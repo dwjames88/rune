@@ -32,5 +32,18 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
+# Code-sign with the first available Apple Development identity (falls back to
+# ad-hoc). Signing gives Rune a stable identity — the prerequisite for
+# integrating system features (Apple Passwords, keychain) directly.
+IDENTITY_HASH="$(security find-identity -v -p codesigning | awk 'NR==1 && /[0-9A-F]{40}/ {print $2}')"
+if [ -n "$IDENTITY_HASH" ]; then
+    echo "› Signing with identity $IDENTITY_HASH"
+    codesign --force --sign "$IDENTITY_HASH" --timestamp=none "$APP"
+else
+    echo "› No Developer identity found — ad-hoc signing"
+    codesign --force --sign - "$APP"
+fi
+codesign --verify --verbose "$APP" 2>&1 | sed 's/^/  /'
+
 echo "› Launching $APP"
 open "$APP"
