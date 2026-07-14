@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import WebKit
 
@@ -535,7 +536,10 @@ private struct ContentArea: View {
             }
         }
         .onChange(of: model.selection) { sync() }
-        .onChange(of: model.activeTab?.urlString) { if !addressFocused { sync() } }
+        // Live URL updates from the active tab: ContentArea doesn't observe the
+        // Tab object, so navigations that never touch the toolbar (start-page
+        // search, link clicks) must push the new URL in via its publisher.
+        .onReceive(activeURLPublisher) { if !addressFocused, address != $0 { address = $0 } }
         .onChange(of: address) { updateSuggestions() }
         .onChange(of: addressFocused) { updateSuggestions() }
         .onAppear { sync() }
@@ -543,6 +547,10 @@ private struct ContentArea: View {
     }
 
     private func sync() { address = model.activeTab?.urlString ?? "" }
+
+    private var activeURLPublisher: AnyPublisher<String, Never> {
+        model.activeTab?.$urlString.eraseToAnyPublisher() ?? Just("").eraseToAnyPublisher()
+    }
 
     private func activate() {
         let list = suggestions
