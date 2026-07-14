@@ -18,4 +18,10 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
                  windowFeatures: WKWindowFeatures) -> WKWebView? {
         model?.adoptPopup(configuration: configuration)
     }
+
+    // Record every completed navigation into browsing history.
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard let url = webView.url else { return }
+        model?.recordVisit(url, title: webView.title ?? "")
+    }
 }

@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "Wisp",
+    name: "Rune",
     platforms: [.macOS(.v14)],
     targets: [
         .executableTarget(
-            name: "Wisp",
-            path: "Sources/Wisp"
+            name: "Rune",
+            path: "Sources/Rune"
         )
     ]
 )

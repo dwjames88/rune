@@ -1,7 +1,7 @@
-# Wisp
+# Rune
 
 Open-source, extremely light, insanely customizable native macOS browser.
-Swift + SwiftUI/AppKit + WebKit (WKWebView). Codename "Wisp".
+Swift + SwiftUI/AppKit + WebKit (WKWebView). Codename "Rune".
 
 ## Non-negotiables
 

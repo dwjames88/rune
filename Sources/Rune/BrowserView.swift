@@ -3,19 +3,31 @@ import WebKit
 
 struct BrowserView: View {
     @ObservedObject var model: BrowserModel
+    let dispatch: (Command) -> Void
+
+    @State private var showPalette = false
 
     var body: some View {
-        HStack(spacing: 0) {
-            if model.sidebarVisible {
-                Sidebar(model: model)
-                    .frame(width: Theme.sidebarWidth)
-                    .transition(.move(edge: .leading))
-                Divider()
+        ZStack {
+            HStack(spacing: 0) {
+                if model.sidebarVisible {
+                    Sidebar(model: model)
+                        .frame(width: Theme.sidebarWidth)
+                        .transition(.move(edge: .leading))
+                    Divider()
+                }
+                ContentArea(model: model)
             }
-            ContentArea(model: model)
+            .animation(.easeInOut(duration: 0.18), value: model.sidebarVisible)
+            .background(Theme.windowBG)
+
+            if showPalette {
+                CommandPalette(model: model, dispatch: dispatch, isPresented: $showPalette)
+            }
         }
-        .animation(.easeInOut(duration: 0.18), value: model.sidebarVisible)
-        .background(Theme.windowBG)
+        .onReceive(NotificationCenter.default.publisher(for: .showCommandPalette)) { _ in
+            showPalette = true
+        }
     }
 }
 
@@ -141,12 +153,60 @@ private struct ContentArea: View {
             ZStack {
                 Theme.windowBG
                 if let tab = model.selectedTab {
-                    WebContainer(webView: tab.webView).id(tab.id)
+                    TabContent(tab: tab, model: model)
                 } else {
                     EmptyState(model: model)
                 }
             }
         }
+    }
+}
+
+/// Shows the native start page until the tab has navigated somewhere.
+private struct TabContent: View {
+    @ObservedObject var tab: Tab
+    @ObservedObject var model: BrowserModel
+
+    var body: some View {
+        if tab.urlString.isEmpty && !tab.isLoading {
+            StartPage(model: model)
+        } else {
+            WebContainer(webView: tab.webView).id(tab.id)
+        }
+    }
+}
+
+private struct StartPage: View {
+    @ObservedObject var model: BrowserModel
+    @State private var query = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(spacing: 22) {
+            Spacer()
+            Text("Rune")
+                .font(.system(size: 40, weight: .semibold, design: .rounded))
+                .foregroundStyle(.primary.opacity(0.85))
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Search \(model.settings.searchEngine.name) or enter address", text: $query)
+                    .textFieldStyle(.plain)
+                    .font(.title3)
+                    .focused($focused)
+                    .onSubmit {
+                        model.navigate(query)
+                        query = ""
+                    }
+            }
+            .padding(.horizontal, 18).padding(.vertical, 14)
+            .frame(maxWidth: 560)
+            .background(Theme.chrome, in: Capsule())
+            .overlay(Capsule().strokeBorder(focused ? Theme.accent : Theme.hairline, lineWidth: 1))
+            Spacer(); Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.windowBG)
+        .onAppear { focused = true }
     }
 }
 
@@ -226,8 +286,4 @@ private struct EmptyState: View {
                 .buttonStyle(.borderedProminent).tint(Theme.accent)
         }
     }
-}
-
-extension Notification.Name {
-    static let focusAddressBar = Notification.Name("wisp.focusAddressBar")
 }

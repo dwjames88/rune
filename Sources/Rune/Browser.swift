@@ -63,15 +63,19 @@ final class BrowserModel: ObservableObject {
     @Published var sidebarVisible = true
 
     let configuration: WKWebViewConfiguration
+    let settings: SettingsStore
+    let history: HistoryStore
+    let shortcuts: ShortcutStore
     private lazy var coordinator = WebCoordinator(model: self)
-
-    static let homeURL = URL(string: "https://duckduckgo.com")!
 
     var pinnedTabs: [Tab] { tabs.filter(\.isPinned) }
     var unpinnedTabs: [Tab] { tabs.filter { !$0.isPinned } }
     var selectedTab: Tab? { tabs.first { $0.id == selectedTabID } }
 
-    init() {
+    init(settings: SettingsStore, history: HistoryStore, shortcuts: ShortcutStore) {
+        self.settings = settings
+        self.history = history
+        self.shortcuts = shortcuts
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()            // persistent cookies/logins
         config.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -89,12 +93,14 @@ final class BrowserModel: ObservableObject {
         return webView
     }
 
+    /// A new tab opens to Rune's own blank start page (a centered search bar),
+    /// not a third-party site. It only loads a URL once you navigate.
     @discardableResult
     func newTab(url: URL? = nil, pinned: Bool = false, select: Bool = true) -> Tab {
         let tab = Tab(webView: makeWebView())
         tab.isPinned = pinned
         tabs.append(tab)
-        tab.load(url ?? Self.homeURL)
+        if let url { tab.load(url) }
         if select { self.select(tab) }
         return tab
     }
@@ -139,25 +145,25 @@ final class BrowserModel: ObservableObject {
     // MARK: Navigation
 
     func navigate(_ input: String) {
-        guard let tab = selectedTab ?? tabs.first else {
-            if let url = Self.resolve(input) { newTab(url: url) }
-            return
-        }
-        if let url = Self.resolve(input) { tab.load(url) }
+        guard let url = resolve(input) else { return }
+        let tab = selectedTab ?? newTab()
+        tab.load(url)
     }
 
     func goBack() { selectedTab?.webView.goBack() }
     func goForward() { selectedTab?.webView.goForward() }
     func reload() { selectedTab?.webView.reload() }
 
-    /// Turn a typed string into a URL, or a DuckDuckGo search if it isn't one.
-    static func resolve(_ input: String) -> URL? {
+    func recordVisit(_ url: URL, title: String) { history.record(url: url, title: title) }
+
+    /// Turn a typed string into a URL, or a search on the chosen engine if it
+    /// isn't one.
+    func resolve(_ input: String) -> URL? {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
-        if text.contains(" ") || !text.contains(".") {
-            var comps = URLComponents(string: "https://duckduckgo.com/")!
-            comps.queryItems = [URLQueryItem(name: "q", value: text)]
-            return comps.url
+        // Looks like a search (has a space, or no dot and isn't localhost).
+        if text.contains(" ") || (!text.contains(".") && text != "localhost") {
+            return settings.searchEngine.url(for: text)
         }
         if text.hasPrefix("http://") || text.hasPrefix("https://") { return URL(string: text) }
         return URL(string: "https://\(text)")

@@ -9,7 +9,11 @@ app.run()
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    let model = BrowserModel()
+    let settings = SettingsStore()
+    let history = HistoryStore()
+    let shortcuts = ShortcutStore()
+    lazy var model = BrowserModel(settings: settings, history: history, shortcuts: shortcuts)
+    lazy var settingsWindow = SettingsWindowController(settings: settings, shortcuts: shortcuts, history: history)
     private var window: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -20,49 +24,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered, defer: false
         )
-        window.title = "Wisp"
+        window.title = "Rune"
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.center()
-        window.setFrameAutosaveName("WispMainWindow")
-        window.contentViewController = NSHostingController(rootView: BrowserView(model: model))
+        window.setFrameAutosaveName("RuneMainWindow")
+        window.contentViewController = NSHostingController(
+            rootView: BrowserView(model: model, dispatch: { [weak self] in self?.dispatch($0) }))
         window.minSize = NSSize(width: 720, height: 480)
         window.makeKeyAndOrderFront(nil)
         self.window = window
 
         NSApp.activate(ignoringOtherApps: true)
         model.newTab()
+
+        // Rebuild the menu whenever the user remaps a shortcut.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(buildMenu), name: .shortcutsChanged, object: nil)
+
+        // Dev affordance: RUNE_SHOW_PALETTE=1 opens the palette on launch so it
+        // can be inspected without synthesizing keystrokes.
+        if ProcessInfo.processInfo.environment["RUNE_SHOW_PALETTE"] == "1" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                NotificationCenter.default.post(name: .showCommandPalette, object: nil)
+            }
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-    // MARK: Menu (built from the Command registry)
+    // MARK: Menu (built from the command registry + current shortcut overrides)
 
-    private func buildMenu() {
+    @objc private func buildMenu() {
         let mainMenu = NSMenu()
 
         // App menu
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "About Wisp", action: nil, keyEquivalent: "")
+        appMenu.addItem(withTitle: "About Rune", action: nil, keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Quit Wisp", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        addCommandItem(.openSettings, to: appMenu)
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Quit Rune", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         mainMenu.addItem(appItem)
 
-        // One submenu per command section.
-        for section in Command.MenuSection.allCases {
+        // One submenu per command section (skipping the app section handled above).
+        for section in Command.MenuSection.allCases where section != .app {
             let sectionItem = NSMenuItem()
             let sectionMenu = NSMenu(title: section.rawValue)
             for command in Command.allCases where command.menu == section {
-                let (key, mods) = command.defaultShortcut
-                let item = NSMenuItem(title: command.title,
-                                      action: #selector(runCommand(_:)),
-                                      keyEquivalent: key)
-                item.keyEquivalentModifierMask = mods
-                item.representedObject = command.rawValue
-                item.target = self
-                sectionMenu.addItem(item)
+                addCommandItem(command, to: sectionMenu)
             }
             sectionItem.submenu = sectionMenu
             sectionItem.title = section.rawValue
@@ -86,6 +98,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = mainMenu
     }
 
+    private func addCommandItem(_ command: Command, to menu: NSMenu) {
+        let shortcut = shortcuts.shortcut(for: command)
+        let item = NSMenuItem(title: command.title,
+                              action: #selector(runCommand(_:)),
+                              keyEquivalent: shortcut.key)
+        item.keyEquivalentModifierMask = shortcut.flags
+        item.representedObject = command.rawValue
+        item.target = self
+        menu.addItem(item)
+    }
+
     @objc private func runCommand(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,
               let command = Command(rawValue: raw) else { return }
@@ -94,6 +117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func dispatch(_ command: Command) {
         switch command {
+        case .commandPalette: NotificationCenter.default.post(name: .showCommandPalette, object: nil)
         case .newTab: model.newTab()
         case .closeTab: model.closeSelected()
         case .reload: model.reload()
@@ -104,6 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .pinTab: model.togglePinSelected()
         case .nextTab: model.selectAdjacent(1)
         case .previousTab: model.selectAdjacent(-1)
+        case .openSettings: settingsWindow.show()
         }
     }
 }

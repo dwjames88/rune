@@ -5,6 +5,7 @@ import AppKit
 /// read from this one list — so "a keyboard shortcut for anything" and "a
 /// setting for everything" are structural, not special-cased per feature.
 enum Command: String, CaseIterable, Identifiable {
+    case commandPalette
     case newTab
     case closeTab
     case reload
@@ -15,11 +16,13 @@ enum Command: String, CaseIterable, Identifiable {
     case pinTab
     case nextTab
     case previousTab
+    case openSettings
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .commandPalette: "Command Palette…"
         case .newTab: "New Tab"
         case .closeTab: "Close Tab"
         case .reload: "Reload Page"
@@ -30,6 +33,25 @@ enum Command: String, CaseIterable, Identifiable {
         case .pinTab: "Pin / Unpin Tab"
         case .nextTab: "Next Tab"
         case .previousTab: "Previous Tab"
+        case .openSettings: "Settings…"
+        }
+    }
+
+    /// SF Symbol shown in the command palette.
+    var icon: String {
+        switch self {
+        case .commandPalette: "command"
+        case .newTab: "plus.square"
+        case .closeTab: "xmark.square"
+        case .reload: "arrow.clockwise"
+        case .goBack: "chevron.left"
+        case .goForward: "chevron.right"
+        case .focusAddress: "magnifyingglass"
+        case .toggleSidebar: "sidebar.left"
+        case .pinTab: "pin"
+        case .nextTab: "arrow.right.to.line"
+        case .previousTab: "arrow.left.to.line"
+        case .openSettings: "gearshape"
         }
     }
 
@@ -37,15 +59,17 @@ enum Command: String, CaseIterable, Identifiable {
     var menu: MenuSection {
         switch self {
         case .newTab, .closeTab, .pinTab: .file
-        case .reload, .toggleSidebar: .view
+        case .reload, .toggleSidebar, .commandPalette: .view
         case .goBack, .goForward: .history
         case .focusAddress, .nextTab, .previousTab: .navigate
+        case .openSettings: .app
         }
     }
 
     /// Default shortcut: (key equivalent, modifiers). Empty key = no default.
     var defaultShortcut: (key: String, modifiers: NSEvent.ModifierFlags) {
         switch self {
+        case .commandPalette: ("k", .command)
         case .newTab: ("t", .command)
         case .closeTab: ("w", .command)
         case .reload: ("r", .command)
@@ -56,10 +80,12 @@ enum Command: String, CaseIterable, Identifiable {
         case .pinTab: ("d", .command)
         case .nextTab: ("]", [.command, .shift])
         case .previousTab: ("[", [.command, .shift])
+        case .openSettings: (",", .command)
         }
     }
 
     enum MenuSection: String, CaseIterable {
+        case app = "Rune"
         case file = "File"
         case view = "View"
         case history = "History"
