@@ -209,4 +209,5 @@ extension Notification.Name {
     static let shortcutsChanged = Notification.Name("rune.shortcutsChanged")
     static let showCommandPalette = Notification.Name("rune.showCommandPalette")
     static let focusAddressBar = Notification.Name("rune.focusAddressBar")
+    static let showAskBar = Notification.Name("rune.showAskBar")
 }

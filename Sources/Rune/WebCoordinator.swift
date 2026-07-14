@@ -4,10 +4,40 @@ import WebKit
 /// TLS is validated by the system by default (we don't weaken it); this is
 /// where a padlock / cert-warning UI and pinning would later hook in.
 @MainActor
-final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     weak var model: BrowserModel?
 
     init(model: BrowserModel?) { self.model = model }
+
+    // MARK: Page bridge (link hovers + selections for Claude)
+
+    nonisolated func userContentController(_ controller: WKUserContentController,
+                                           didReceive message: WKScriptMessage) {
+        guard let body = message.body as? [String: Any],
+              let type = body["type"] as? String else { return }
+        let webView = message.webView
+        Task { @MainActor in
+            guard let webView, let tab = self.tab(for: webView) else { return }
+            switch type {
+            case "linkHover":
+                guard let href = body["href"] as? String, let url = URL(string: href),
+                      url.absoluteString != tab.urlString else { return }
+                tab.hoveredLink = HoverTarget(url: url,
+                                              x: body["x"] as? Double ?? 0,
+                                              y: body["y"] as? Double ?? 0)
+            case "linkOut":
+                tab.hoveredLink = nil
+            case "selection":
+                guard let text = body["text"] as? String else { return }
+                tab.selection = SelectionTarget(text: text,
+                                                x: body["x"] as? Double ?? 0,
+                                                y: body["y"] as? Double ?? 0)
+            case "selectionCleared":
+                tab.selection = nil
+            default: break
+            }
+        }
+    }
 
     func webView(_ webView: WKWebView,
                  createWebViewWith configuration: WKWebViewConfiguration,

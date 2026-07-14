@@ -55,6 +55,19 @@ final class Tab: ObservableObject, Identifiable {
     @Published var customName: String?
     @Published var colorHex: String?
 
+    // Claude's ambient hooks into the page
+    @Published var hoveredLink: HoverTarget?
+    @Published var selection: SelectionTarget?
+
+    /// Readable text of the current page (for "ask about this page").
+    func pageText() async -> String {
+        await withCheckedContinuation { continuation in
+            webView.evaluateJavaScript(PageBridge.pageTextJS) { result, _ in
+                continuation.resume(returning: result as? String ?? "")
+            }
+        }
+    }
+
     private var cancellables: Set<AnyCancellable> = []
 
     init(webView: WKWebView) {
@@ -104,12 +117,13 @@ final class BrowserModel: ObservableObject {
     let settings: SettingsStore
     let history: HistoryStore
     let shortcuts: ShortcutStore
+    let claude: ClaudeService
     private lazy var coordinator = WebCoordinator(model: self)
 
     private struct Persisted: Codable { var favorites: [SavedTab]; var pinned: [SavedTab]; var folders: [Folder] }
 
-    init(settings: SettingsStore, history: HistoryStore, shortcuts: ShortcutStore) {
-        self.settings = settings; self.history = history; self.shortcuts = shortcuts
+    init(settings: SettingsStore, history: HistoryStore, shortcuts: ShortcutStore, claude: ClaudeService) {
+        self.settings = settings; self.history = history; self.shortcuts = shortcuts; self.claude = claude
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
         config.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -120,6 +134,10 @@ final class BrowserModel: ObservableObject {
         if let saved = Storage.loadJSON(Persisted.self, from: "tabs.json") {
             favorites = saved.favorites; pinned = saved.pinned; folders = saved.folders
         }
+
+        // Claude's page bridge — link hovers and selections.
+        config.userContentController.addUserScript(PageBridge.userScript)
+        config.userContentController.add(coordinator, name: PageBridge.handlerName)
     }
 
     func persist() {
@@ -396,6 +414,32 @@ final class BrowserModel: ObservableObject {
         let index = sessionTabs.firstIndex { selection == .session($0.id) } ?? 0
         let next = (index + delta + sessionTabs.count) % sessionTabs.count
         select(.session(sessionTabs[next].id))
+    }
+
+    /// "that article about titanium frames" → the actual URL, chosen by Claude
+    /// from your history. Local prediction handles prefixes; this handles intent.
+    func findInHistory(_ query: String) async throws -> URL? {
+        let candidates = history.entries
+            .sorted { ($0.visitCount, $0.lastVisited) > ($1.visitCount, $1.lastVisited) }
+            .prefix(120)
+        guard !candidates.isEmpty else { return nil }
+
+        let list = candidates.enumerated()
+            .map { "\($0.offset). \($0.element.title) — \($0.element.url)" }
+            .joined(separator: "\n")
+
+        let answer = try await claude.complete(
+            system: "You match a person's vague description to a page in their browsing history. "
+                + "Reply with ONLY the number of the best match, or NONE if nothing fits.",
+            user: "History:\n\(list)\n\nThey're looking for: \(query)",
+            maxTokens: 12, effort: "low")
+
+        let digits = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+            .prefix(while: \.isNumber)
+        guard let index = Int(digits), candidates.indices.contains(candidates.startIndex + index) else {
+            return nil
+        }
+        return URL(string: Array(candidates)[index].url)
     }
 
     func resolve(_ input: String) -> URL? {

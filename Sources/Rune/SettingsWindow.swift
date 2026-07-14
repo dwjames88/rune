@@ -9,9 +9,12 @@ final class SettingsWindowController {
     let shortcuts: ShortcutStore
     let history: HistoryStore
     let appearance: AppearanceStore
+    let claude: ClaudeService
 
-    init(settings: SettingsStore, shortcuts: ShortcutStore, history: HistoryStore, appearance: AppearanceStore) {
-        self.settings = settings; self.shortcuts = shortcuts; self.history = history; self.appearance = appearance
+    init(settings: SettingsStore, shortcuts: ShortcutStore, history: HistoryStore,
+         appearance: AppearanceStore, claude: ClaudeService) {
+        self.settings = settings; self.shortcuts = shortcuts; self.history = history
+        self.appearance = appearance; self.claude = claude
     }
 
     func show() {
@@ -22,7 +25,8 @@ final class SettingsWindowController {
             w.title = "Rune Settings"
             w.center(); w.setFrameAutosaveName("RuneSettings"); w.isReleasedWhenClosed = false
             w.contentViewController = NSHostingController(rootView: RuneSettingsView(
-                settings: settings, shortcuts: shortcuts, history: history, appearance: appearance))
+                settings: settings, shortcuts: shortcuts, history: history,
+                appearance: appearance, claude: claude))
             window = w
         }
         window?.makeKeyAndOrderFront(nil)
@@ -35,8 +39,9 @@ private struct RuneSettingsView: View {
     @ObservedObject var shortcuts: ShortcutStore
     @ObservedObject var history: HistoryStore
     @ObservedObject var appearance: AppearanceStore
+    @ObservedObject var claude: ClaudeService
 
-    enum Tab: String, CaseIterable { case appearance = "Appearance", presets = "Presets", browsing = "Browsing", shortcuts = "Shortcuts" }
+    enum Tab: String, CaseIterable { case appearance = "Appearance", presets = "Presets", browsing = "Browsing", claude = "Claude", shortcuts = "Shortcuts" }
     @State private var tab: Tab = .appearance
 
     var body: some View {
@@ -50,6 +55,7 @@ private struct RuneSettingsView: View {
             case .appearance: AppearancePane(appearance: appearance)
             case .presets: PresetsPane(appearance: appearance)
             case .browsing: BrowsingPane(settings: settings, history: history)
+            case .claude: ClaudePane(claude: claude)
             case .shortcuts: ShortcutsPane(shortcuts: shortcuts)
             }
         }
@@ -301,5 +307,63 @@ private final class RecorderNSView: NSView {
               let key = chars.first, !mods.isEmpty else { NSSound.beep(); return }
         onCapture?(Shortcut(key: String(key), modifiers: mods.rawValue))
         window?.makeFirstResponder(nil)
+    }
+}
+
+
+// MARK: Claude
+
+private struct ClaudePane: View {
+    @ObservedObject var claude: ClaudeService
+    @State private var key = ""
+    @State private var saved = false
+
+    var body: some View {
+        Form {
+            Section {
+                HStack {
+                    Image(systemName: claude.hasKey ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(claude.hasKey ? .green : .orange)
+                    Text(claude.hasKey ? "API key saved in your Keychain." : "No API key yet.")
+                    Spacer()
+                    if claude.hasKey {
+                        Button("Remove", role: .destructive) { claude.setKey(""); key = "" }
+                    }
+                }
+                SecureField("sk-ant-…", text: $key)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(save)
+                HStack {
+                    Spacer()
+                    Button("Save Key", action: save).disabled(key.isEmpty)
+                    if saved { Text("Saved").font(.caption).foregroundStyle(.secondary) }
+                }
+            } header: {
+                Text("Anthropic API Key")
+            } footer: {
+                Text("Stored in the macOS Keychain — never in Rune's settings files, and never sent anywhere but api.anthropic.com. Get a key at console.anthropic.com.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section {
+                Label("Hover any link for a summary of where it goes", systemImage: "link")
+                Label("Select text for Explain / Summarize / Translate", systemImage: "text.cursor")
+                Label("Press ⌘J to ask about the page you're on", systemImage: "sparkles")
+                Label("Type a question in the address bar to find a page from memory", systemImage: "magnifyingglass")
+            } header: {
+                Text("What Claude Does Here")
+            } footer: {
+                Text("Model: \(ClaudeService.model). Page text is only sent when you invoke one of these.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private func save() {
+        claude.setKey(key)
+        key = ""
+        saved = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { saved = false }
     }
 }

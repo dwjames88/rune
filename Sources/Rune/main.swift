@@ -13,9 +13,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let history = HistoryStore()
     let shortcuts = ShortcutStore()
     let appearance = AppearanceStore()
-    lazy var model = BrowserModel(settings: settings, history: history, shortcuts: shortcuts)
+    let claude = ClaudeService()
+    lazy var model = BrowserModel(settings: settings, history: history, shortcuts: shortcuts, claude: claude)
     lazy var settingsWindow = SettingsWindowController(
-        settings: settings, shortcuts: shortcuts, history: history, appearance: appearance)
+        settings: settings, shortcuts: shortcuts, history: history, appearance: appearance, claude: claude)
     private var window: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -118,6 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func dispatch(_ command: Command) {
         switch command {
         case .commandPalette: NotificationCenter.default.post(name: .showCommandPalette, object: nil)
+        case .askPage: NotificationCenter.default.post(name: .showAskBar, object: nil)
         case .newTab: model.newTab()
         case .closeTab: model.closeActive()
         case .reload: model.reload()

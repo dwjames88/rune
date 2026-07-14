@@ -6,6 +6,7 @@ import AppKit
 /// setting for everything" are structural, not special-cased per feature.
 enum Command: String, CaseIterable, Identifiable {
     case commandPalette
+    case askPage
     case newTab
     case closeTab
     case reload
@@ -23,6 +24,7 @@ enum Command: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .commandPalette: "Command Palette…"
+        case .askPage: "Ask About This Page…"
         case .newTab: "New Tab"
         case .closeTab: "Close Tab"
         case .reload: "Reload Page"
@@ -41,6 +43,7 @@ enum Command: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .commandPalette: "command"
+        case .askPage: "sparkles"
         case .newTab: "plus.square"
         case .closeTab: "xmark.square"
         case .reload: "arrow.clockwise"
@@ -59,7 +62,7 @@ enum Command: String, CaseIterable, Identifiable {
     var menu: MenuSection {
         switch self {
         case .newTab, .closeTab, .pinTab: .file
-        case .reload, .toggleSidebar, .commandPalette: .view
+        case .reload, .toggleSidebar, .commandPalette, .askPage: .view
         case .goBack, .goForward: .history
         case .focusAddress, .nextTab, .previousTab: .navigate
         case .openSettings: .app
@@ -70,6 +73,7 @@ enum Command: String, CaseIterable, Identifiable {
     var defaultShortcut: (key: String, modifiers: NSEvent.ModifierFlags) {
         switch self {
         case .commandPalette: ("k", .command)
+        case .askPage: ("j", .command)
         case .newTab: ("t", .command)
         case .closeTab: ("w", .command)
         case .reload: ("r", .command)

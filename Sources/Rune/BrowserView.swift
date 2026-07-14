@@ -7,9 +7,10 @@ struct BrowserView: View {
     let dispatch: (Command) -> Void
 
     @State private var showPalette = false
+    @State private var showAsk = false
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .top) {
             HStack(spacing: 0) {
                 if model.sidebarVisible && !appearance.appearance.sidebarOnRight { sidebar; Divider() }
                 ContentArea(model: model)
@@ -18,12 +19,18 @@ struct BrowserView: View {
             .animation(.easeInOut(duration: 0.18), value: model.sidebarVisible)
             .background(appearance.windowBG)
 
+            if showAsk {
+                AskBar(model: model, claude: model.claude, isPresented: $showAsk)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
             if showPalette {
                 CommandPalette(model: model, dispatch: dispatch, isPresented: $showPalette)
             }
         }
+        .animation(.easeOut(duration: 0.15), value: showAsk)
         .font(appearance.uiFont)
         .onReceive(NotificationCenter.default.publisher(for: .showCommandPalette)) { _ in showPalette = true }
+        .onReceive(NotificationCenter.default.publisher(for: .showAskBar)) { _ in showAsk = true }
     }
 
     private var sidebar: some View {
@@ -473,12 +480,18 @@ private struct ContentArea: View {
     private var suggestions: [Suggestion] {
         guard addressFocused, !address.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
         let predictions = model.history.predict(address)
+        var out: [Suggestion] = []
         // If you've clearly started typing a host you visit, that's the answer —
         // lead with it so Return just goes there.
         if let top = predictions.first, model.history.isConfident(address, top) {
-            return [.history(top), .navigate(address)] + predictions.dropFirst().map(Suggestion.history)
+            out = [.history(top), .navigate(address)] + predictions.dropFirst().map(Suggestion.history)
+        } else {
+            out = [.navigate(address)] + predictions.map(Suggestion.history)
         }
-        return [.navigate(address)] + predictions.map(Suggestion.history)
+        // Sounds like a description, not a destination — offer Claude.
+        let words = address.split(separator: " ").count
+        if model.claude.hasKey, words >= 3 { out.append(.askClaude(address)) }
+        return out
     }
 
     var body: some View {
@@ -515,6 +528,11 @@ private struct ContentArea: View {
         switch list[min(highlighted, list.count - 1)] {
         case .navigate(let q): model.navigate(q)
         case .history(let e): model.navigate(e.url)
+        case .askClaude(let q):
+            Task {
+                if let url = try? await model.findInHistory(q) { model.navigate(url.absoluteString) }
+                else { model.navigate(q) }   // nothing matched — fall back to a search
+            }
         }
         addressFocused = false
         highlighted = 0
@@ -524,10 +542,12 @@ private struct ContentArea: View {
 enum Suggestion: Identifiable {
     case navigate(String)
     case history(HistoryEntry)
+    case askClaude(String)
     var id: String {
         switch self {
         case .navigate(let q): "go:\(q)"
         case .history(let e): "h:\(e.url)"
+        case .askClaude(let q): "ai:\(q)"
         }
     }
 }
@@ -571,6 +591,7 @@ private struct SuggestionList: View {
         switch s {
         case .navigate(let q): return model.resolve(q).map { _ in q.contains(".") ? "arrow.up.forward" : "magnifyingglass" } ?? "magnifyingglass"
         case .history: return "clock"
+        case .askClaude: return "sparkles"
         }
     }
     private func title(_ s: Suggestion) -> String {
@@ -579,6 +600,7 @@ private struct SuggestionList: View {
             if q.contains(".") && !q.contains(" ") { return "Go to \(q)" }
             return "Search \(model.settings.searchEngine.name) for “\(q)”"
         case .history(let e): return e.title.isEmpty ? e.url : e.title
+        case .askClaude: return "Ask Claude to find this in your history"
         }
     }
 }
@@ -591,6 +613,25 @@ private struct TabContent: View {
             StartPage(model: model)
         } else {
             WebContainer(webView: tab.webView).id(tab.id)
+                // Claude, anchored to the page: hover a link for a summary,
+                // select text for actions.
+                .overlay(alignment: .topLeading) {
+                    if let hover = tab.hoveredLink {
+                        LinkSummaryPopover(target: hover, claude: model.claude)
+                            .offset(x: min(max(8, hover.x), 900), y: hover.y + 6)
+                            .allowsHitTesting(false)
+                            .transition(.opacity)
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    if let selection = tab.selection {
+                        SelectionActions(target: selection, claude: model.claude)
+                            .offset(x: min(max(8, selection.x), 860), y: selection.y + 8)
+                            .transition(.opacity)
+                    }
+                }
+                .animation(.easeOut(duration: 0.12), value: tab.hoveredLink)
+                .animation(.easeOut(duration: 0.12), value: tab.selection)
         }
     }
 }
