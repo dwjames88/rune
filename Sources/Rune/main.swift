@@ -65,7 +65,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         center.addObserver(self, selector: #selector(applyWindowChrome), name: .appearanceChanged, object: nil)
     }
 
-    func applicationWillTerminate(_ notification: Notification) { model.persist() }
+    func applicationWillTerminate(_ notification: Notification) {
+        model.persist()
+        history.flush()
+        appearance.flush()
+    }
 
     // Auto-PiP on leaving the app (the "window blur" case). App-level rather
     // than window-level so opening Settings or the palette doesn't trigger it.
@@ -81,13 +85,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
+    private var appliedIconTokens: (String, String)?
+
     @objc private func applyWindowChrome() {
         let hidden = appearance.appearance.hideTrafficLights
         for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             window?.standardWindowButton(kind)?.isHidden = hidden
         }
         // Custom app icon (nil = back to the bundle's Icon Composer icon).
-        NSApp.applicationIconImage = AppIconRenderer.custom(for: appearance.appearance)
+        // Rendering is 1024px — only redo it when the icon tokens changed, not
+        // on every appearance tweak.
+        let tokens = (appearance.appearance.appIconBackground, appearance.appearance.appIconGlyph)
+        if appliedIconTokens == nil || appliedIconTokens! != tokens {
+            appliedIconTokens = tokens
+            NSApp.applicationIconImage = AppIconRenderer.custom(for: appearance.appearance)
+        }
     }
 
     // MARK: Menu (from the command registry + current shortcut overrides)

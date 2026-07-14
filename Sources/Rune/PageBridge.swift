@@ -32,8 +32,14 @@ enum PageBridge {
     (function () {
       const post = (m) => { try { window.webkit.messageHandlers.rune.postMessage(m); } catch (e) {} };
       let timer = null;
+      let hoverShown = false;    // a linkHover was posted and not yet cleared
+      let selShown = false;      // a selection was posted and not yet cleared
       const hoverMs = () => window.__runeHoverMs !== undefined ? window.__runeHoverMs : \(hoverDelayMs);
       const hoverOff = () => window.__runeHoverOff !== undefined ? window.__runeHoverOff : \(hoverEnabled ? "false" : "true");
+      const clearHover = () => {
+        clearTimeout(timer); timer = null;
+        if (hoverShown) { hoverShown = false; post({ type: 'linkOut' }); }
+      };
 
       document.addEventListener('mouseover', (e) => {
         if (hoverOff()) return;
@@ -44,13 +50,13 @@ enum PageBridge {
         clearTimeout(timer);
         timer = setTimeout(() => {
           const r = a.getBoundingClientRect();
+          hoverShown = true;
           post({ type: 'linkHover', href: href, x: r.left, y: r.bottom });
         }, hoverMs());
       }, true);
 
       document.addEventListener('mouseout', (e) => {
-        const a = e.target.closest && e.target.closest('a[href]');
-        if (a) { clearTimeout(timer); post({ type: 'linkOut' }); }
+        if (e.target.closest && e.target.closest('a[href]')) { clearHover(); }
       }, true);
 
       document.addEventListener('mouseup', () => {
@@ -59,14 +65,18 @@ enum PageBridge {
           const text = sel ? String(sel).trim() : '';
           if (text.length > 1 && sel.rangeCount) {
             const r = sel.getRangeAt(0).getBoundingClientRect();
+            selShown = true;
             post({ type: 'selection', text: text.slice(0, 4000), x: r.left, y: r.bottom });
-          } else {
+          } else if (selShown) {
+            selShown = false;
             post({ type: 'selectionCleared' });
           }
         }, 10);
       }, true);
 
-      document.addEventListener('scroll', () => post({ type: 'linkOut' }), true);
+      // Only bother the native side while something is actually showing —
+      // scrolling must never pay for the bridge.
+      document.addEventListener('scroll', clearHover, true);
     })();
     """ }
 

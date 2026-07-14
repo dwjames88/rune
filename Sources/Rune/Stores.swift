@@ -186,17 +186,28 @@ final class HistoryStore: ObservableObject {
         }.prefix(limit).map { $0 }
     }
 
+    /// Host of a URL string by slicing — no URL/Foundation parsing. Runs for
+    /// every history entry on every keystroke, so it has to be cheap.
+    static func fastHost(of url: String) -> Substring {
+        var s = Substring(url)
+        if let r = s.range(of: "://") { s = s[r.upperBound...] }
+        if let slash = s.firstIndex(of: "/") { s = s[..<slash] }
+        if s.hasPrefix("www.") { s = s.dropFirst(4) }
+        return s
+    }
+
     /// Auto-predict: rank by *where* the query matches (host prefix beats title
     /// prefix beats a loose contains), then by how often and how recently you
     /// went there. This is what makes the address bar guess the right thing.
     func predict(_ query: String, limit: Int = 5) -> [HistoryEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return [] }
+        let now = Date()
 
         func score(_ e: HistoryEntry) -> Double? {
             let url = e.url.lowercased()
             let title = e.title.lowercased()
-            let host = URL(string: e.url)?.host?.lowercased().replacingOccurrences(of: "www.", with: "") ?? ""
+            let host = Self.fastHost(of: url)
 
             var base: Double
             if host.hasPrefix(q) { base = 1000 }
@@ -208,7 +219,7 @@ final class HistoryStore: ObservableObject {
 
             // Frequency (log-damped) and recency (decays over ~2 weeks).
             let frequency = log2(Double(e.visitCount) + 1) * 20
-            let days = max(0, Date().timeIntervalSince(e.lastVisited) / 86_400)
+            let days = max(0, now.timeIntervalSince(e.lastVisited) / 86_400)
             let recency = max(0, 60 - days * 4)
             // Prefer shorter URLs — usually the canonical page, not a deep link.
             let brevity = max(0, 30 - Double(e.url.count) / 8)
@@ -226,13 +237,26 @@ final class HistoryStore: ObservableObject {
     func isConfident(_ query: String, _ entry: HistoryEntry) -> Bool {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty, !q.contains(" ") else { return false }
-        let host = URL(string: entry.url)?.host?
-            .lowercased().replacingOccurrences(of: "www.", with: "") ?? ""
-        return host.hasPrefix(q)
+        return Self.fastHost(of: entry.url.lowercased()).hasPrefix(q)
     }
 
-    func clear() { entries = []; save() }
-    private func save() { Storage.saveJSON(entries, to: "history.json") }
+    func clear() { entries = []; flush() }
+
+    // Every page visit used to rewrite all of history.json; coalesce bursts of
+    // navigation into one write. AppDelegate flushes on quit.
+    private var saveTask: Task<Void, Never>?
+    private func save() {
+        saveTask?.cancel()
+        saveTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            self?.flush()
+        }
+    }
+    func flush() {
+        saveTask?.cancel(); saveTask = nil
+        Storage.saveJSON(entries, to: "history.json")
+    }
 }
 
 // MARK: - Shortcuts (remappable)

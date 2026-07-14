@@ -101,9 +101,22 @@ final class AppearanceStore: ObservableObject {
         presets = Storage.loadJSON([ThemePreset].self, from: "presets.json") ?? Self.builtIns
     }
 
+    // The notification (window chrome, app icon) fires immediately; the disk
+    // write is debounced so dragging a slider doesn't write a file per tick.
+    // AppDelegate flushes on quit.
+    private var saveTask: Task<Void, Never>?
     private func persist() {
-        Storage.saveJSON(appearance, to: "appearance.json")
         NotificationCenter.default.post(name: .appearanceChanged, object: nil)
+        saveTask?.cancel()
+        saveTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            self?.flush()
+        }
+    }
+    func flush() {
+        saveTask?.cancel(); saveTask = nil
+        Storage.saveJSON(appearance, to: "appearance.json")
     }
 
     // MARK: Presets

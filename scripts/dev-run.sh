@@ -14,6 +14,10 @@ APP="$REPO_ROOT/.build/Rune.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Rune"
+# Release builds ship without symbols — cuts the binary roughly in third.
+if [ "$CONFIG" = "release" ]; then
+    strip -rSTx "$APP/Contents/MacOS/Rune"
+fi
 
 # App icon. Preferred path: compile the Icon Composer bundle (Assets/Rune.icon)
 # with actool — produces Assets.car (the real layered icon on macOS 26+) plus a

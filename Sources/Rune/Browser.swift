@@ -75,14 +75,17 @@ final class Tab: ObservableObject, Identifiable {
         webView.allowsMagnification = true
         self.webView = webView
 
+        // KVO fires repeatedly with unchanged values (especially title on SPAs);
+        // only publish real changes so observing rows don't re-render for nothing.
         webView.publisher(for: \.title).sink { [weak self] in
-            if let t = $0, !t.isEmpty { self?.title = t }
+            if let self, let t = $0, !t.isEmpty, t != self.title { self.title = t }
         }.store(in: &cancellables)
-        webView.publisher(for: \.url).sink { [weak self] in self?.urlString = $0?.absoluteString ?? "" }
-            .store(in: &cancellables)
-        webView.publisher(for: \.isLoading).assign(to: &$isLoading)
-        webView.publisher(for: \.canGoBack).assign(to: &$canGoBack)
-        webView.publisher(for: \.canGoForward).assign(to: &$canGoForward)
+        webView.publisher(for: \.url).sink { [weak self] in
+            if let self { let s = $0?.absoluteString ?? ""; if s != self.urlString { self.urlString = s } }
+        }.store(in: &cancellables)
+        webView.publisher(for: \.isLoading).removeDuplicates().assign(to: &$isLoading)
+        webView.publisher(for: \.canGoBack).removeDuplicates().assign(to: &$canGoBack)
+        webView.publisher(for: \.canGoForward).removeDuplicates().assign(to: &$canGoForward)
     }
 
     var displayName: String { customName ?? (title.isEmpty ? "New Tab" : title) }
@@ -123,21 +126,21 @@ final class Tab: ObservableObject, Identifiable {
     """
 
     func requestPiPIfPlaying() {
-        webView.evaluateJavaScript(Self.enterPiPJS) { result, error in
+        webView.evaluateJavaScript(Self.enterPiPJS) { _, error in
             if let error { NSLog("Rune PiP enter failed: %@", error.localizedDescription) }
-            else { NSLog("Rune PiP enter: %@", result as? String ?? "?") }
         }
     }
 
     /// Bring a PiP'd video back into the page (used when its tab is reselected).
     func exitPiPIfActive() {
-        webView.evaluateJavaScript(Self.exitPiPJS) { result, error in
+        webView.evaluateJavaScript(Self.exitPiPJS) { _, error in
             if let error { NSLog("Rune PiP exit failed: %@", error.localizedDescription) }
         }
     }
 
     /// Manual toggle: exit if a video is in PiP, otherwise send one there.
-    /// Unlike the automatic path, a paused video qualifies too.
+    /// Unlike the automatic path, a paused video qualifies too, and the outcome
+    /// is logged — a manual toggle that does nothing is worth diagnosing.
     func togglePiP() {
         webView.evaluateJavaScript("""
         (function(){
@@ -515,7 +518,9 @@ final class BrowserModel: ObservableObject {
 
     func updateFavicon(_ image: NSImage, for tab: Tab) {
         tab.favicon = image
-        if let savedID = tab.savedID { updateSaved(savedID) { $0.faviconPNG = image.png } }
+        guard let savedID = tab.savedID, let png = image.png,
+              savedTab(savedID)?.faviconPNG != png else { return }   // skip a tabs.json write when unchanged
+        updateSaved(savedID) { $0.faviconPNG = png }
     }
 
     // MARK: Navigation

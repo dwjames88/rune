@@ -347,6 +347,20 @@ private struct RowBody<Icon: View, Trailing: View>: View {
 
 // MARK: Favicon
 
+/// Decoded-favicon cache: SwiftUI re-evaluates row bodies on every hover, and
+/// decoding PNG data each time is the single hottest thing the sidebar does.
+@MainActor
+enum FaviconCache {
+    private static let cache = NSCache<NSData, NSImage>()
+    static func image(for data: Data) -> NSImage? {
+        let key = data as NSData
+        if let hit = cache.object(forKey: key) { return hit }
+        guard let img = NSImage(data: data) else { return nil }
+        cache.setObject(img, forKey: key)
+        return img
+    }
+}
+
 struct Favicon: View {
     var png: Data? = nil
     var image: NSImage? = nil
@@ -355,7 +369,7 @@ struct Favicon: View {
     let size: CGFloat
     var loading = false
 
-    private var nsImage: NSImage? { image ?? png.flatMap(NSImage.init(data:)) }
+    private var nsImage: NSImage? { image ?? png.flatMap(FaviconCache.image(for:)) }
 
     var body: some View {
         Group {
@@ -477,9 +491,14 @@ private struct ContentArea: View {
     @State private var address = ""
     @FocusState private var addressFocused: Bool
     @State private var highlighted = 0
+    // Memoized: recomputed once per keystroke/focus change, not on every body
+    // evaluation (predict scans the whole history).
+    @State private var suggestions: [Suggestion] = []
 
-    private var suggestions: [Suggestion] {
-        guard addressFocused, !address.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
+    private func updateSuggestions() {
+        guard addressFocused, !address.trimmingCharacters(in: .whitespaces).isEmpty else {
+            suggestions = []; return
+        }
         let predictions = model.history.predict(address)
         var out: [Suggestion] = []
         // If you've clearly started typing a host you visit, that's the answer —
@@ -492,7 +511,7 @@ private struct ContentArea: View {
         // Sounds like a description, not a destination — offer Claude.
         let words = address.split(separator: " ").count
         if model.claude.hasKey, words >= 3 { out.append(.askClaude(address)) }
-        return out
+        suggestions = out
     }
 
     var body: some View {
@@ -517,6 +536,8 @@ private struct ContentArea: View {
         }
         .onChange(of: model.selection) { sync() }
         .onChange(of: model.activeTab?.urlString) { if !addressFocused { sync() } }
+        .onChange(of: address) { updateSuggestions() }
+        .onChange(of: addressFocused) { updateSuggestions() }
         .onAppear { sync() }
         .onReceive(NotificationCenter.default.publisher(for: .focusAddressBar)) { _ in addressFocused = true }
     }
@@ -713,7 +734,7 @@ private struct StartPageTile: View {
         Button(action: open) {
             VStack(spacing: 6) {
                 Group {
-                    if let png = saved.faviconPNG, let image = NSImage(data: png) {
+                    if let png = saved.faviconPNG, let image = FaviconCache.image(for: png) {
                         Image(nsImage: image).resizable().scaledToFit().frame(width: 24, height: 24)
                     } else {
                         Image(systemName: "globe").font(.system(size: 18))
