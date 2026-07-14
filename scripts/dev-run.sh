@@ -28,6 +28,15 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+      <dict>
+        <key>UTTypeIdentifier</key><string>com.dwjames.Rune.tab</string>
+        <key>UTTypeDescription</key><string>Rune Tab</string>
+        <key>UTTypeConformsTo</key><array><string>public.data</string></array>
+        <key>UTTypeTagSpecification</key><dict/>
+      </dict>
+    </array>
 </dict>
 </plist>
 PLIST

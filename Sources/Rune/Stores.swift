@@ -109,6 +109,51 @@ final class HistoryStore: ObservableObject {
         }.prefix(limit).map { $0 }
     }
 
+    /// Auto-predict: rank by *where* the query matches (host prefix beats title
+    /// prefix beats a loose contains), then by how often and how recently you
+    /// went there. This is what makes the address bar guess the right thing.
+    func predict(_ query: String, limit: Int = 5) -> [HistoryEntry] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return [] }
+
+        func score(_ e: HistoryEntry) -> Double? {
+            let url = e.url.lowercased()
+            let title = e.title.lowercased()
+            let host = URL(string: e.url)?.host?.lowercased().replacingOccurrences(of: "www.", with: "") ?? ""
+
+            var base: Double
+            if host.hasPrefix(q) { base = 1000 }
+            else if title.hasPrefix(q) { base = 700 }
+            else if host.contains(q) { base = 450 }
+            else if title.contains(q) { base = 300 }
+            else if url.contains(q) { base = 150 }
+            else { return nil }
+
+            // Frequency (log-damped) and recency (decays over ~2 weeks).
+            let frequency = log2(Double(e.visitCount) + 1) * 20
+            let days = max(0, Date().timeIntervalSince(e.lastVisited) / 86_400)
+            let recency = max(0, 60 - days * 4)
+            // Prefer shorter URLs — usually the canonical page, not a deep link.
+            let brevity = max(0, 30 - Double(e.url.count) / 8)
+            return base + frequency + recency + brevity
+        }
+
+        return entries.compactMap { e in score(e).map { ($0, e) } }
+            .sorted { $0.0 > $1.0 }
+            .prefix(limit)
+            .map(\.1)
+    }
+
+    /// A confident hit: you typed the start of a host you actually visit
+    /// ("pink" → pinkbike.com). These lead the list instead of a generic search.
+    func isConfident(_ query: String, _ entry: HistoryEntry) -> Bool {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty, !q.contains(" ") else { return false }
+        let host = URL(string: entry.url)?.host?
+            .lowercased().replacingOccurrences(of: "www.", with: "") ?? ""
+        return host.hasPrefix(q)
+    }
+
     func clear() { entries = []; save() }
     private func save() { Storage.saveJSON(entries, to: "history.json") }
 }

@@ -48,8 +48,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let center = NotificationCenter.default
         center.addObserver(self, selector: #selector(buildMenu), name: .shortcutsChanged, object: nil)
         center.addObserver(self, selector: #selector(applyWindowChrome), name: .appearanceChanged, object: nil)
-        center.addObserver(self, selector: #selector(beginRename(_:)), name: .beginRename, object: nil)
-        center.addObserver(self, selector: #selector(beginRenameFolder(_:)), name: .beginRenameFolder, object: nil)
     }
 
     func applicationWillTerminate(_ notification: Notification) { model.persist() }
@@ -60,29 +58,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             window?.standardWindowButton(kind)?.isHidden = hidden
         }
-    }
-
-    // MARK: Rename prompts (from context menus)
-
-    @objc private func beginRename(_ note: Notification) {
-        guard let selection = note.object as? Selection else { return }
-        promptText(title: "Rename Tab", value: model.currentName(for: selection)) { [weak self] in
-            self?.model.setName($0, for: selection)
-        }
-    }
-    @objc private func beginRenameFolder(_ note: Notification) {
-        guard let id = note.object as? UUID else { return }
-        let current = model.folders.first { $0.id == id }?.name ?? ""
-        promptText(title: "Rename Folder", value: current) { [weak self] in self?.model.renameFolder(id, to: $0) }
-    }
-    private func promptText(title: String, value: String, completion: (String) -> Void) {
-        let alert = NSAlert()
-        alert.messageText = title
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
-        field.stringValue = value
-        alert.accessoryView = field
-        alert.addButton(withTitle: "OK"); alert.addButton(withTitle: "Cancel")
-        if alert.runModal() == .alertFirstButtonReturn { completion(field.stringValue) }
     }
 
     // MARK: Menu (from the command registry + current shortcut overrides)

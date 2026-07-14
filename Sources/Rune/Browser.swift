@@ -28,6 +28,13 @@ enum Selection: Equatable, Hashable {
     case session(UUID)
 }
 
+/// Where a dragged tab was dropped. `index` is the insertion point (nil = append).
+enum DropTarget: Equatable {
+    case favorites(Int?)
+    case pinned(folderID: UUID?, index: Int?)
+    case session(Int?)
+}
+
 // MARK: - Live tab
 
 /// A live tab. Its WKWebView is created once and kept alive — switching never
@@ -279,6 +286,80 @@ final class BrowserModel: ObservableObject {
             openTabs[id]?.colorHex = hex
         }
     }
+    // MARK: Drag & drop
+
+    /// Handle a drop of `drag` onto a destination. `beforePinned` / `beforeSession`
+    /// give an insertion point when dropping onto a row.
+    func handleDrop(_ drag: TabDrag, to destination: DropTarget) {
+        switch destination {
+        case .favorites(let index):
+            guard let saved = detachToSaved(drag) else { return }
+            guard favorites.count < Self.maxFavorites || drag.origin == .favorite else { return }
+            favorites.insert(saved, at: min(index ?? favorites.count, favorites.count))
+
+        case .pinned(let folderID, let index):
+            guard var saved = detachToSaved(drag) else { return }
+            saved.folderID = folderID
+            // Insert relative to the siblings in that folder.
+            let siblings = pinned(in: folderID)
+            if let index, index < siblings.count,
+               let anchor = pinned.firstIndex(where: { $0.id == siblings[index].id }) {
+                pinned.insert(saved, at: anchor)
+            } else {
+                pinned.append(saved)
+            }
+
+        case .session(let index):
+            // Dragging a saved entry back out makes it an ordinary session tab.
+            guard drag.origin != .session else { reorderSession(drag.id, to: index); return }
+            guard let saved = savedTab(drag.id) else { return }
+            let live = openTabs[drag.id]
+            removeSaved(drag.id)
+            let tab = live ?? Tab(webView: makeWebView())
+            tab.savedID = nil
+            if live == nil, let url = URL(string: saved.url) { tab.load(url) }
+            openTabs[drag.id] = nil
+            sessionTabs.insert(tab, at: min(index ?? sessionTabs.count, sessionTabs.count))
+            selection = .session(tab.id)
+        }
+        persist()
+    }
+
+    /// Pull the dragged item out of wherever it lives and return it as a SavedTab
+    /// (converting a session tab into one, keeping its live web view).
+    private func detachToSaved(_ drag: TabDrag) -> SavedTab? {
+        switch drag.origin {
+        case .session:
+            guard let tab = sessionTabs.first(where: { $0.id == drag.id }),
+                  let url = tab.webView.url else { return nil }
+            let saved = SavedTab(url: url.absoluteString, name: tab.displayName,
+                                 customName: tab.customName != nil,
+                                 colorHex: tab.colorHex, faviconPNG: tab.favicon?.png)
+            sessionTabs.removeAll { $0.id == tab.id }
+            tab.savedID = saved.id
+            openTabs[saved.id] = tab
+            selection = .saved(saved.id)
+            return saved
+        case .pinned, .favorite:
+            guard let saved = savedTab(drag.id) else { return nil }
+            removeSaved(drag.id)      // keeps openTabs entry alive
+            return saved
+        }
+    }
+
+    private func removeSaved(_ id: UUID) {
+        favorites.removeAll { $0.id == id }
+        pinned.removeAll { $0.id == id }
+    }
+
+    private func reorderSession(_ id: UUID, to index: Int?) {
+        guard let from = sessionTabs.firstIndex(where: { $0.id == id }) else { return }
+        let tab = sessionTabs.remove(at: from)
+        var target = index ?? sessionTabs.count
+        if let i = index, from < i { target = i - 1 }
+        sessionTabs.insert(tab, at: min(max(0, target), sessionTabs.count))
+    }
+
     func currentName(for selection: Selection) -> String {
         switch selection {
         case .session(let id): return sessionTabs.first { $0.id == id }?.displayName ?? ""

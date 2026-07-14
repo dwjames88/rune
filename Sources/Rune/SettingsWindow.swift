@@ -71,13 +71,32 @@ private struct AppearancePane: View {
                 ColorTokenRow(label: "Toolbar", token: a.chromeColor)
                 ColorTokenRow(label: "Background", token: a.backgroundColor)
             }
-            Section("Typography") {
+            Section {
                 Picker("Font", selection: a.fontName) {
                     ForEach(AppearanceStore.availableFonts, id: \.self) {
                         Text($0 == "system" ? "System" : $0).tag($0)
                     }
                 }
                 sliderRow("Font size", value: a.fontSize, range: 10...20, step: 1, suffix: "pt")
+                HStack {
+                    Text("Text color")
+                    Spacer()
+                    Toggle("Auto contrast", isOn: Binding(
+                        get: { appearance.appearance.textColor == "auto" },
+                        set: { appearance.appearance.textColor = $0 ? "auto" : "#FFFFFF" }))
+                        .toggleStyle(.checkbox)
+                    if appearance.appearance.textColor != "auto" {
+                        ColorPicker("", selection: Binding(
+                            get: { Color(hex: appearance.appearance.textColor) ?? .primary },
+                            set: { appearance.appearance.textColor = $0.hex ?? "#FFFFFF" }),
+                            supportsOpacity: false).labelsHidden()
+                    }
+                }
+            } header: {
+                Text("Typography")
+            } footer: {
+                Text("Auto contrast picks black or white text for the best WCAG contrast against each background.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Layout") {
                 sliderRow("Sidebar width", value: a.sidebarWidth, range: 180...360, step: 5, suffix: "px")

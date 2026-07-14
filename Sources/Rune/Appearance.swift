@@ -14,6 +14,9 @@ struct Appearance: Codable, Equatable {
     // Typography
     var fontName = "system"        // "system" or a font family name
     var fontSize: Double = 13
+    /// "auto" = pick black/white for best contrast against the background
+    /// (WCAG), otherwise a hex the user chose.
+    var textColor = "auto"
 
     // Layout
     var sidebarWidth: Double = 240
@@ -102,6 +105,23 @@ final class AppearanceStore: ObservableObject {
     var cornerRadius: CGFloat { appearance.cornerRadius }
     var sidebarWidth: CGFloat { appearance.sidebarWidth }
 
+    // MARK: Contrast-aware text
+
+    /// Text color to use on a given background: honors a user-chosen color,
+    /// otherwise picks black or white for the better WCAG contrast ratio.
+    func text(on background: Color) -> Color {
+        if appearance.textColor != "auto", let c = Color(hex: appearance.textColor) { return c }
+        return background.prefersLightText ? .white : .black
+    }
+    /// Softer secondary text that still clears contrast on the background.
+    func secondaryText(on background: Color) -> Color {
+        text(on: background).opacity(0.62)
+    }
+    var sidebarText: Color { text(on: sidebarBG) }
+    var sidebarSecondary: Color { secondaryText(on: sidebarBG) }
+    var chromeText: Color { text(on: chrome) }
+    var contentText: Color { text(on: windowBG) }
+
     var uiFont: Font {
         appearance.fontName == "system"
             ? .system(size: appearance.fontSize)
@@ -135,6 +155,29 @@ extension Color {
                       Int(round(c.redComponent * 255)),
                       Int(round(c.greenComponent * 255)),
                       Int(round(c.blueComponent * 255)))
+    }
+}
+
+extension Color {
+    /// WCAG relative luminance (0 = black, 1 = white).
+    var luminance: Double {
+        guard let c = NSColor(self).usingColorSpace(.sRGB) else { return 1 }
+        func lin(_ v: CGFloat) -> Double {
+            let v = Double(v)
+            return v <= 0.03928 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * lin(c.redComponent) + 0.7152 * lin(c.greenComponent) + 0.0722 * lin(c.blueComponent)
+    }
+
+    /// Contrast ratio against another color (WCAG: 1…21).
+    func contrast(with other: Color) -> Double {
+        let a = luminance, b = other.luminance
+        return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+    }
+
+    /// True when white text reads better on this background than black text.
+    var prefersLightText: Bool {
+        contrast(with: .white) >= contrast(with: .black)
     }
 }
 
