@@ -2,65 +2,96 @@ import Combine
 import SwiftUI
 import WebKit
 
-/// A single tab. Its WKWebView is created once and kept alive for the tab's
-/// whole lifetime — switching tabs never reloads, which is what makes a link
-/// feel like an application you return to rather than a bookmark you re-open.
+// MARK: - Persistent sidebar entries
+
+/// A saved sidebar entry (a favorite or a pinned tab). Persists across launches.
+struct SavedTab: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var url: String
+    var name: String
+    var customName = false
+    var colorHex: String? = nil
+    var faviconPNG: Data? = nil
+    var folderID: UUID? = nil       // pinned only; favorites can't be foldered
+}
+
+struct Folder: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var name: String
+    var icon: String = "folder.fill"
+    var collapsed = false
+}
+
+/// What is currently focused in the content area.
+enum Selection: Equatable, Hashable {
+    case saved(UUID)
+    case session(UUID)
+}
+
+// MARK: - Live tab
+
+/// A live tab. Its WKWebView is created once and kept alive — switching never
+/// reloads. Session tabs are ephemeral; a saved entry gets a live tab when opened.
 @MainActor
 final class Tab: ObservableObject, Identifiable {
     let id = UUID()
     let webView: WKWebView
+    var savedID: UUID?              // set when this live tab backs a SavedTab
 
-    @Published var title: String = "New Tab"
-    @Published var urlString: String = ""
-    @Published var host: String = ""
+    @Published var title = "New Tab"
+    @Published var urlString = ""
     @Published var isLoading = false
     @Published var canGoBack = false
     @Published var canGoForward = false
-    @Published var isPinned = false
+    @Published var favicon: NSImage?
+
+    @Published var customName: String?
+    @Published var colorHex: String?
 
     private var cancellables: Set<AnyCancellable> = []
 
-    /// Wraps a web view the model built (or one the engine handed us for a popup).
     init(webView: WKWebView) {
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsMagnification = true
         self.webView = webView
 
-        // Mirror WKWebView's KVO-observable state into @Published properties.
         webView.publisher(for: \.title).sink { [weak self] in
             if let t = $0, !t.isEmpty { self?.title = t }
         }.store(in: &cancellables)
-        webView.publisher(for: \.url).sink { [weak self] url in
-            self?.urlString = url?.absoluteString ?? ""
-            self?.host = url?.host ?? ""
-        }.store(in: &cancellables)
+        webView.publisher(for: \.url).sink { [weak self] in self?.urlString = $0?.absoluteString ?? "" }
+            .store(in: &cancellables)
         webView.publisher(for: \.isLoading).assign(to: &$isLoading)
         webView.publisher(for: \.canGoBack).assign(to: &$canGoBack)
         webView.publisher(for: \.canGoForward).assign(to: &$canGoForward)
     }
 
+    var displayName: String { customName ?? (title.isEmpty ? "New Tab" : title) }
+
     func load(_ url: URL) { webView.load(URLRequest(url: url)) }
 
-    /// Best-effort auto-PiP: if a video is playing, pop it out. Called when the
-    /// tab is switched away from.
     func requestPiPIfPlaying() {
-        let js = """
-        (function(){
-          const v = [...document.querySelectorAll('video')].find(v => !v.paused && !v.ended && v.readyState > 2);
-          if (v && document.pictureInPictureEnabled && !document.pictureInPictureElement) {
-            v.requestPictureInPicture().catch(()=>{});
-          }
-        })();
-        """
-        webView.evaluateJavaScript(js)
+        webView.evaluateJavaScript("""
+        (function(){const v=[...document.querySelectorAll('video')].find(v=>!v.paused&&!v.ended&&v.readyState>2);
+        if(v&&document.pictureInPictureEnabled&&!document.pictureInPictureElement){v.requestPictureInPicture().catch(()=>{});}})();
+        """)
     }
 }
 
+// MARK: - Browser model
+
 @MainActor
 final class BrowserModel: ObservableObject {
-    @Published var tabs: [Tab] = []
-    @Published var selectedTabID: Tab.ID?
+    // Persistent
+    @Published var favorites: [SavedTab] = []      // max 6, no folders
+    @Published var pinned: [SavedTab] = []
+    @Published var folders: [Folder] = []
+    // Ephemeral (this session only)
+    @Published var sessionTabs: [Tab] = []
+    @Published var openTabs: [UUID: Tab] = [:]     // savedID -> live tab
+    @Published var selection: Selection?
     @Published var sidebarVisible = true
+
+    static let maxFavorites = 6
 
     let configuration: WKWebViewConfiguration
     let settings: SettingsStore
@@ -68,23 +99,35 @@ final class BrowserModel: ObservableObject {
     let shortcuts: ShortcutStore
     private lazy var coordinator = WebCoordinator(model: self)
 
-    var pinnedTabs: [Tab] { tabs.filter(\.isPinned) }
-    var unpinnedTabs: [Tab] { tabs.filter { !$0.isPinned } }
-    var selectedTab: Tab? { tabs.first { $0.id == selectedTabID } }
+    private struct Persisted: Codable { var favorites: [SavedTab]; var pinned: [SavedTab]; var folders: [Folder] }
 
     init(settings: SettingsStore, history: HistoryStore, shortcuts: ShortcutStore) {
-        self.settings = settings
-        self.history = history
-        self.shortcuts = shortcuts
+        self.settings = settings; self.history = history; self.shortcuts = shortcuts
         let config = WKWebViewConfiguration()
-        config.websiteDataStore = .default()            // persistent cookies/logins
+        config.websiteDataStore = .default()
         config.defaultWebpagePreferences.allowsContentJavaScript = true
         config.preferences.isElementFullscreenEnabled = true
         config.preferences.setValue(true, forKey: "allowsPictureInPictureMediaPlayback")
         self.configuration = config
+
+        if let saved = Storage.loadJSON(Persisted.self, from: "tabs.json") {
+            favorites = saved.favorites; pinned = saved.pinned; folders = saved.folders
+        }
     }
 
-    // MARK: Tabs
+    func persist() {
+        Storage.saveJSON(Persisted(favorites: favorites, pinned: pinned, folders: folders), to: "tabs.json")
+    }
+
+    // MARK: Live tab lookup
+
+    var activeTab: Tab? {
+        switch selection {
+        case .session(let id): return sessionTabs.first { $0.id == id }
+        case .saved(let id): return openTabs[id]
+        case nil: return nil
+        }
+    }
 
     private func makeWebView(configuration: WKWebViewConfiguration? = nil) -> WKWebView {
         let webView = WKWebView(frame: .zero, configuration: configuration ?? self.configuration)
@@ -93,75 +136,190 @@ final class BrowserModel: ObservableObject {
         return webView
     }
 
-    /// A new tab opens to Rune's own blank start page (a centered search bar),
-    /// not a third-party site. It only loads a URL once you navigate.
+    // MARK: Session tabs
+
     @discardableResult
-    func newTab(url: URL? = nil, pinned: Bool = false, select: Bool = true) -> Tab {
+    func newTab(url: URL? = nil, select: Bool = true) -> Tab {
         let tab = Tab(webView: makeWebView())
-        tab.isPinned = pinned
-        tabs.append(tab)
+        sessionTabs.append(tab)
         if let url { tab.load(url) }
-        if select { self.select(tab) }
+        if select { self.select(.session(tab.id)) }
         return tab
     }
 
-    /// Wrap a WKWebView the engine created for us (target=_blank popups) and
-    /// return it so WebKit can drive the new navigation.
     func adoptPopup(configuration: WKWebViewConfiguration) -> WKWebView {
         let webView = makeWebView(configuration: configuration)
         let tab = Tab(webView: webView)
-        tabs.append(tab)
-        select(tab)
+        sessionTabs.append(tab)
+        select(.session(tab.id))
         return webView
     }
 
-    func select(_ tab: Tab) {
-        if let current = selectedTab, current.id != tab.id {
-            current.requestPiPIfPlaying()
+    // MARK: Selection
+
+    func select(_ new: Selection) {
+        if let current = activeTab { current.requestPiPIfPlaying() }
+        if case .saved(let id) = new, openTabs[id] == nil, let saved = savedTab(id) {
+            let tab = Tab(webView: makeWebView())
+            tab.savedID = id
+            tab.customName = saved.customName ? saved.name : nil
+            tab.colorHex = saved.colorHex
+            if let png = saved.faviconPNG { tab.favicon = NSImage(data: png) }
+            openTabs[id] = tab
+            if let url = URL(string: saved.url) { tab.load(url) }
         }
-        selectedTabID = tab.id
+        selection = new
     }
 
-    func selectAdjacent(_ delta: Int) {
-        guard !tabs.isEmpty else { return }
-        let index = tabs.firstIndex { $0.id == selectedTabID } ?? 0
-        let next = (index + delta + tabs.count) % tabs.count
-        select(tabs[next])
+    func savedTab(_ id: UUID) -> SavedTab? {
+        favorites.first { $0.id == id } ?? pinned.first { $0.id == id }
     }
 
-    func close(_ tab: Tab) {
-        guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+    // MARK: Close / unload
+
+    func close(session tab: Tab) {
         tab.webView.stopLoading()
-        tabs.remove(at: index)
-        if selectedTabID == tab.id {
-            selectedTabID = tabs[max(0, index - 1)...].first?.id ?? tabs.last?.id
+        sessionTabs.removeAll { $0.id == tab.id }
+        if selection == .session(tab.id) {
+            selection = sessionTabs.last.map { .session($0.id) } ?? pinned.first.map { .saved($0.id) }
         }
     }
 
-    func closeSelected() { if let t = selectedTab { close(t) } }
+    func closeActive() {
+        switch selection {
+        case .session(let id): if let t = sessionTabs.first(where: { $0.id == id }) { close(session: t) }
+        case .saved(let id): unload(savedID: id)
+        case nil: break
+        }
+    }
 
-    func togglePinSelected() { selectedTab?.isPinned.toggle() }
+    /// Unload a saved entry's live tab (keeps the row).
+    func unload(savedID: UUID) {
+        openTabs[savedID]?.webView.stopLoading()
+        openTabs[savedID] = nil
+        if selection == .saved(savedID) { selection = nil }
+    }
+
+    // MARK: Favorites / pinning
+
+    var canAddFavorite: Bool { favorites.count < Self.maxFavorites }
+
+    func addFavorite(from tab: Tab) {
+        guard canAddFavorite, let url = tab.webView.url else { return }
+        let saved = SavedTab(url: url.absoluteString, name: tab.displayName,
+                             colorHex: tab.colorHex, faviconPNG: tab.favicon?.png)
+        favorites.append(saved)
+        rebind(tab, to: saved.id); persist()
+    }
+
+    func pin(_ tab: Tab) {
+        guard let url = tab.webView.url else { return }
+        let saved = SavedTab(url: url.absoluteString, name: tab.displayName,
+                             colorHex: tab.colorHex, faviconPNG: tab.favicon?.png)
+        pinned.append(saved)
+        rebind(tab, to: saved.id); persist()
+    }
+
+    /// Move a live session tab to be the live tab of a new saved entry.
+    private func rebind(_ tab: Tab, to savedID: UUID) {
+        sessionTabs.removeAll { $0.id == tab.id }
+        tab.savedID = savedID
+        openTabs[savedID] = tab
+        selection = .saved(savedID)
+    }
+
+    func removeFavorite(_ id: UUID) { favorites.removeAll { $0.id == id }; unload(savedID: id); persist() }
+    func unpin(_ id: UUID) { pinned.removeAll { $0.id == id }; unload(savedID: id); persist() }
+
+    // MARK: Folders
+
+    @discardableResult
+    func addFolder(name: String = "New Folder") -> Folder {
+        let folder = Folder(name: name); folders.append(folder); persist(); return folder
+    }
+    func move(_ savedID: UUID, toFolder folderID: UUID?) {
+        guard let i = pinned.firstIndex(where: { $0.id == savedID }) else { return }
+        pinned[i].folderID = folderID; persist()
+    }
+    func renameFolder(_ id: UUID, to name: String) {
+        guard let i = folders.firstIndex(where: { $0.id == id }) else { return }
+        folders[i].name = name; persist()
+    }
+    func setFolderIcon(_ id: UUID, _ icon: String) {
+        guard let i = folders.firstIndex(where: { $0.id == id }) else { return }
+        folders[i].icon = icon; persist()
+    }
+    func deleteFolder(_ id: UUID) {
+        for i in pinned.indices where pinned[i].folderID == id { pinned[i].folderID = nil }
+        folders.removeAll { $0.id == id }; persist()
+    }
+    func toggleFolder(_ id: UUID) {
+        guard let i = folders.firstIndex(where: { $0.id == id }) else { return }
+        folders[i].collapsed.toggle(); persist()
+    }
+    func pinned(in folderID: UUID?) -> [SavedTab] { pinned.filter { $0.folderID == folderID } }
+
+    // MARK: Customize name / color
+
+    func setName(_ name: String, for selection: Selection) {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        switch selection {
+        case .session(let id):
+            sessionTabs.first { $0.id == id }?.customName = trimmed.isEmpty ? nil : trimmed
+        case .saved(let id):
+            updateSaved(id) { $0.name = trimmed.isEmpty ? $0.name : trimmed; $0.customName = !trimmed.isEmpty }
+            openTabs[id]?.customName = trimmed.isEmpty ? nil : trimmed
+        }
+    }
+    func setColor(_ hex: String?, for selection: Selection) {
+        switch selection {
+        case .session(let id): sessionTabs.first { $0.id == id }?.colorHex = hex
+        case .saved(let id):
+            updateSaved(id) { $0.colorHex = hex }
+            openTabs[id]?.colorHex = hex
+        }
+    }
+    func currentName(for selection: Selection) -> String {
+        switch selection {
+        case .session(let id): return sessionTabs.first { $0.id == id }?.displayName ?? ""
+        case .saved(let id): return savedTab(id)?.name ?? ""
+        }
+    }
+    private func updateSaved(_ id: UUID, _ mutate: (inout SavedTab) -> Void) {
+        if let i = favorites.firstIndex(where: { $0.id == id }) { mutate(&favorites[i]) }
+        else if let i = pinned.firstIndex(where: { $0.id == id }) { mutate(&pinned[i]) }
+        persist()
+    }
+
+    // MARK: Favicon (called by coordinator on load finish)
+
+    func updateFavicon(_ image: NSImage, for tab: Tab) {
+        tab.favicon = image
+        if let savedID = tab.savedID { updateSaved(savedID) { $0.faviconPNG = image.png } }
+    }
 
     // MARK: Navigation
 
     func navigate(_ input: String) {
         guard let url = resolve(input) else { return }
-        let tab = selectedTab ?? newTab()
+        let tab = activeTab ?? newTab()
         tab.load(url)
     }
-
-    func goBack() { selectedTab?.webView.goBack() }
-    func goForward() { selectedTab?.webView.goForward() }
-    func reload() { selectedTab?.webView.reload() }
-
+    func goBack() { activeTab?.webView.goBack() }
+    func goForward() { activeTab?.webView.goForward() }
+    func reload() { activeTab?.webView.reload() }
     func recordVisit(_ url: URL, title: String) { history.record(url: url, title: title) }
 
-    /// Turn a typed string into a URL, or a search on the chosen engine if it
-    /// isn't one.
+    func selectAdjacentSession(_ delta: Int) {
+        guard !sessionTabs.isEmpty else { return }
+        let index = sessionTabs.firstIndex { selection == .session($0.id) } ?? 0
+        let next = (index + delta + sessionTabs.count) % sessionTabs.count
+        select(.session(sessionTabs[next].id))
+    }
+
     func resolve(_ input: String) -> URL? {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
-        // Looks like a search (has a space, or no dot and isn't localhost).
         if text.contains(" ") || (!text.contains(".") && text != "localhost") {
             return settings.searchEngine.url(for: text)
         }
@@ -170,3 +328,9 @@ final class BrowserModel: ObservableObject {
     }
 }
 
+extension NSImage {
+    var png: Data? {
+        guard let tiff = tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { return nil }
+        return rep.representation(using: .png, properties: [:])
+    }
+}

@@ -49,7 +49,9 @@ scripts/dev-run.sh          # build + launch as a .app (WKWebView needs a bundle
 
 - [x] **Command palette + shortcut remapping**
 - [x] **Custom search engine + native blank start page + web memory**
-- [ ] **App signing** — Developer ID, so we can integrate system features directly
+- [x] **Deep customization** — colors, fonts, radius, sidebar, hide traffic lights; savable/shareable `.runetheme` presets (Settings ▸ Appearance / Presets)
+- [x] **Tab organization** — Favorites (≤6, favicon tiles), Pinned + Folders, Session tabs; per-tab custom name & color; favicons everywhere
+- [x] **App signing** — Apple Development identity (every build signs)
 - [ ] **Apple Passwords integration** — AutoFill credential provider (needs signing + entitlements)
 - [ ] **Auto Picture-in-Picture** — hook is wired (`Tab.requestPiPIfPlaying` on switch); make it robust
 - [ ] **Links-as-apps, fully** — persistent pinned apps, per-app state, smooth switching

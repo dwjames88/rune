@@ -7,11 +7,8 @@ import WebKit
 final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
     weak var model: BrowserModel?
 
-    init(model: BrowserModel?) {
-        self.model = model
-    }
+    init(model: BrowserModel?) { self.model = model }
 
-    // target=_blank / window.open → open a new tab instead of a detached window.
     func webView(_ webView: WKWebView,
                  createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction,
@@ -19,9 +16,28 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         model?.adoptPopup(configuration: configuration)
     }
 
-    // Record every completed navigation into browsing history.
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard let url = webView.url else { return }
         model?.recordVisit(url, title: webView.title ?? "")
+        fetchFavicon(for: webView)
+    }
+
+    private func tab(for webView: WKWebView) -> Tab? {
+        if let t = model?.sessionTabs.first(where: { $0.webView === webView }) { return t }
+        return model?.openTabs.values.first { $0.webView === webView }
+    }
+
+    /// Grab the page's declared favicon (or /favicon.ico) and hand it to the model.
+    private func fetchFavicon(for webView: WKWebView) {
+        let js = "document.querySelector(\"link[rel~='icon']\")?.href || (location.origin + '/favicon.ico')"
+        webView.evaluateJavaScript(js) { [weak self] result, _ in
+            guard let self, let href = result as? String, let iconURL = URL(string: href),
+                  let tab = self.tab(for: webView) else { return }
+            Task {
+                guard let (data, _) = try? await URLSession.shared.data(from: iconURL),
+                      let image = NSImage(data: data) else { return }
+                await MainActor.run { self.model?.updateFavicon(image, for: tab) }
+            }
+        }
     }
 }
