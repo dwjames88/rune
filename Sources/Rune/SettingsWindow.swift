@@ -109,6 +109,28 @@ private struct AppearancePane: View {
                 sliderRow("Corner radius", value: a.cornerRadius, range: 0...16, step: 1, suffix: "px")
                 Toggle("Sidebar on the right", isOn: a.sidebarOnRight)
             }
+            Section {
+                Toggle("Compact address bar", isOn: a.compactAddressBar)
+                ForEach(Command.allCases) { command in
+                    Toggle(isOn: toolbarBinding(command)) {
+                        HStack(spacing: 8) {
+                            Image(systemName: command.icon).frame(width: 20).foregroundStyle(.secondary)
+                            Text(command.title)
+                        }
+                    }
+                }
+            } header: {
+                Text("Toolbar")
+            } footer: {
+                Text("Checked commands appear as buttons before the address bar. Compact address bar shows just the site until you click it.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Start Page") {
+                TextField("Greeting", text: a.startPageGreeting, prompt: Text("Rune"))
+                Toggle("Show favorites", isOn: a.startPageShowFavorites)
+                Toggle("Show recent history", isOn: a.startPageShowRecents)
+                ColorTokenRow(label: "Background", token: a.startPageBackground)
+            }
             Section("Window") {
                 Toggle("Hide traffic lights", isOn: a.hideTrafficLights)
                 Text("Hides the red/yellow/green buttons. Drag the toolbar to move the window; ⌘W / ⌘M still work.")
@@ -119,6 +141,19 @@ private struct AppearancePane: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    /// Membership toggle for a command in the toolbar button list — checking
+    /// appends it after the existing buttons, unchecking removes it.
+    private func toolbarBinding(_ command: Command) -> Binding<Bool> {
+        Binding(
+            get: { appearance.appearance.toolbarButtons.contains(command.rawValue) },
+            set: { on in
+                var buttons = appearance.appearance.toolbarButtons
+                buttons.removeAll { $0 == command.rawValue }
+                if on { buttons.append(command.rawValue) }
+                appearance.appearance.toolbarButtons = buttons
+            })
     }
 
     private func sliderRow(_ label: String, value: Binding<Double>, range: ClosedRange<Double>, step: Double, suffix: String) -> some View {
@@ -228,6 +263,34 @@ private struct BrowsingPane: View {
                 Picker("Search engine", selection: $settings.searchEngine) {
                     ForEach(settings.allEngines) { Text($0.name).tag($0) }
                 }
+            }
+            Section {
+                Picker("New tabs open with", selection: $settings.newTabBehavior) {
+                    ForEach(NewTabBehavior.allCases) { Text($0.label).tag($0) }
+                }
+                if settings.newTabBehavior == .homePage {
+                    TextField("Home page", text: $settings.homePageURL,
+                              prompt: Text("example.com"))
+                }
+                Picker("Place new tabs", selection: $settings.newTabPlacement) {
+                    ForEach(NewTabPlacement.allCases) { Text($0.label).tag($0) }
+                }
+            } header: {
+                Text("New Tabs")
+            } footer: {
+                Text("⌘T never stacks empty tabs — if a start page is already open, it's focused instead.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                Picker("Auto Picture in Picture", selection: $settings.autoPiP) {
+                    ForEach(AutoPiPMode.allCases) { Text($0.label).tag($0) }
+                }
+                Toggle("Return video to the page when you come back", isOn: $settings.autoPiPReturnInline)
+            } header: {
+                Text("Media")
+            } footer: {
+                Text("A playing video pops into a floating window when you leave its tab. \"\(Command.togglePiP.title)\" in the View menu toggles it manually.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Browsing Data") {
                 LabeledContent("History") {

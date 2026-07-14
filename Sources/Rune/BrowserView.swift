@@ -13,7 +13,7 @@ struct BrowserView: View {
         ZStack(alignment: .top) {
             HStack(spacing: 0) {
                 if model.sidebarVisible && !appearance.appearance.sidebarOnRight { sidebar; Divider() }
-                ContentArea(model: model)
+                ContentArea(model: model, dispatch: dispatch)
                 if model.sidebarVisible && appearance.appearance.sidebarOnRight { Divider(); sidebar }
             }
             .animation(.easeInOut(duration: 0.18), value: model.sidebarVisible)
@@ -471,6 +471,7 @@ private struct TabMenu: View {
 
 private struct ContentArea: View {
     @ObservedObject var model: BrowserModel
+    let dispatch: (Command) -> Void
     @EnvironmentObject var appearance: AppearanceStore
 
     @State private var address = ""
@@ -496,7 +497,7 @@ private struct ContentArea: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Toolbar(model: model, address: $address, addressFocused: $addressFocused,
+            Toolbar(model: model, dispatch: dispatch, address: $address, addressFocused: $addressFocused,
                     highlighted: $highlighted, suggestionCount: suggestions.count, activate: activate)
             Divider()
             ZStack(alignment: .top) {
@@ -642,11 +643,17 @@ private struct StartPage: View {
     @State private var query = ""
     @FocusState private var focused: Bool
 
+    private var a: Appearance { appearance.appearance }
+    private var greeting: String { a.startPageGreeting.isEmpty ? "Rune" : a.startPageGreeting }
+    private var recents: [HistoryEntry] {
+        Array(model.history.entries.sorted { $0.lastVisited > $1.lastVisited }.prefix(6))
+    }
+
     var body: some View {
         VStack(spacing: 22) {
             Spacer()
-            Text("Rune").font(appearance.font(40, weight: .semibold))
-                .foregroundStyle(appearance.contentText.opacity(0.85))
+            Text(greeting).font(appearance.font(40, weight: .semibold))
+                .foregroundStyle(appearance.text(on: appearance.startPageBG).opacity(0.85))
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(appearance.secondaryText(on: appearance.chrome))
@@ -658,15 +665,77 @@ private struct StartPage: View {
             .padding(.horizontal, 18).padding(.vertical, 14).frame(maxWidth: 560)
             .background(appearance.chrome, in: Capsule())
             .overlay(Capsule().strokeBorder(focused ? appearance.accent : appearance.hairline, lineWidth: 1))
+
+            if a.startPageShowFavorites && !model.favorites.isEmpty {
+                HStack(spacing: 14) {
+                    ForEach(model.favorites) { fav in
+                        StartPageTile(saved: fav) { model.select(.saved(fav.id)) }
+                    }
+                }
+                .padding(.top, 8)
+            }
+            if a.startPageShowRecents && !recents.isEmpty {
+                VStack(spacing: 2) {
+                    ForEach(recents) { entry in
+                        Button { model.navigate(entry.url) } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "clock").font(.system(size: 11))
+                                    .foregroundStyle(appearance.secondaryText(on: appearance.startPageBG))
+                                Text(entry.title.isEmpty ? entry.url : entry.title).lineLimit(1)
+                                    .foregroundStyle(appearance.text(on: appearance.startPageBG).opacity(0.8))
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .frame(maxWidth: 560)
+                .padding(.top, 4)
+            }
             Spacer(); Spacer()
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity).background(appearance.windowBG)
+        .frame(maxWidth: .infinity, maxHeight: .infinity).background(appearance.startPageBG)
         .onAppear { focused = true }
+        .onReceive(NotificationCenter.default.publisher(for: .focusStartPage)) { _ in focused = true }
+    }
+}
+
+/// A favorite on the start page: favicon tile + name, like the sidebar tiles
+/// but larger and labeled.
+private struct StartPageTile: View {
+    let saved: SavedTab
+    let open: () -> Void
+    @EnvironmentObject var appearance: AppearanceStore
+
+    var body: some View {
+        Button(action: open) {
+            VStack(spacing: 6) {
+                Group {
+                    if let png = saved.faviconPNG, let image = NSImage(data: png) {
+                        Image(nsImage: image).resizable().scaledToFit().frame(width: 24, height: 24)
+                    } else {
+                        Image(systemName: "globe").font(.system(size: 18))
+                            .foregroundStyle(appearance.secondaryText(on: appearance.chrome))
+                    }
+                }
+                .frame(width: 52, height: 52)
+                .background(appearance.chrome, in: RoundedRectangle(cornerRadius: appearance.cornerRadius + 2))
+                .overlay(RoundedRectangle(cornerRadius: appearance.cornerRadius + 2)
+                    .strokeBorder(appearance.hairline))
+                Text(saved.name).font(appearance.font(11)).lineLimit(1)
+                    .foregroundStyle(appearance.secondaryText(on: appearance.startPageBG))
+                    .frame(maxWidth: 64)
+            }
+        }
+        .buttonStyle(.plain)
     }
 }
 
 private struct Toolbar: View {
     @ObservedObject var model: BrowserModel
+    let dispatch: (Command) -> Void
     @Binding var address: String
     var addressFocused: FocusState<Bool>.Binding
     @Binding var highlighted: Int
@@ -674,31 +743,54 @@ private struct Toolbar: View {
     let activate: () -> Void
     @EnvironmentObject var appearance: AppearanceStore
 
+    /// Buttons come from the appearance's list of command rawValues, so the
+    /// toolbar is fully user-composable (and round-trips through presets).
+    private var commands: [Command] {
+        appearance.appearance.toolbarButtons.compactMap(Command.init(rawValue:))
+    }
+
+    /// Host-only address display ("pinkbike.com") while the field isn't focused.
+    private var compactHost: String {
+        guard let host = URL(string: address)?.host else { return address }
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
+    private var showCompact: Bool {
+        appearance.appearance.compactAddressBar && !addressFocused.wrappedValue && !address.isEmpty
+    }
+
     var body: some View {
         HStack(spacing: 8) {
-            button("sidebar.left") { model.sidebarVisible.toggle() }
-            button("chevron.left") { model.goBack() }.disabled(!(model.activeTab?.canGoBack ?? false))
-            button("chevron.right") { model.goForward() }.disabled(!(model.activeTab?.canGoForward ?? false))
-            button(model.activeTab?.isLoading == true ? "xmark" : "arrow.clockwise") { model.reload() }
+            ForEach(commands) { commandButton($0) }
 
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").font(.system(size: 11))
                     .foregroundStyle(appearance.secondaryText(on: appearance.chrome))
-                TextField("Search or enter address", text: $address)
-                    .textFieldStyle(.plain)
-                    .foregroundStyle(appearance.chromeText)
-                    .focused(addressFocused)
-                    .onSubmit(activate)
-                    .onChange(of: address) { highlighted = 0 }
-                    .onKeyPress(.downArrow) {
-                        guard suggestionCount > 0 else { return .ignored }
-                        highlighted = (highlighted + 1) % suggestionCount; return .handled
+                ZStack(alignment: .leading) {
+                    TextField("Search or enter address", text: $address)
+                        .textFieldStyle(.plain)
+                        .foregroundStyle(appearance.chromeText)
+                        .focused(addressFocused)
+                        .onSubmit(activate)
+                        .onChange(of: address) { highlighted = 0 }
+                        .onKeyPress(.downArrow) {
+                            guard suggestionCount > 0 else { return .ignored }
+                            highlighted = (highlighted + 1) % suggestionCount; return .handled
+                        }
+                        .onKeyPress(.upArrow) {
+                            guard suggestionCount > 0 else { return .ignored }
+                            highlighted = (highlighted - 1 + suggestionCount) % suggestionCount; return .handled
+                        }
+                        .onKeyPress(.escape) { addressFocused.wrappedValue = false; return .handled }
+                        .opacity(showCompact ? 0 : 1)
+                    if showCompact {
+                        Text(compactHost).lineLimit(1)
+                            .foregroundStyle(appearance.chromeText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(appearance.windowBG)   // hide the field underneath
+                            .contentShape(Rectangle())
+                            .onTapGesture { addressFocused.wrappedValue = true }
                     }
-                    .onKeyPress(.upArrow) {
-                        guard suggestionCount > 0 else { return .ignored }
-                        highlighted = (highlighted - 1 + suggestionCount) % suggestionCount; return .handled
-                    }
-                    .onKeyPress(.escape) { addressFocused.wrappedValue = false; return .handled }
+                }
             }
             .padding(.horizontal, 10).padding(.vertical, 6)
             .background(appearance.windowBG, in: RoundedRectangle(cornerRadius: appearance.cornerRadius))
@@ -708,6 +800,20 @@ private struct Toolbar: View {
         .padding(.horizontal, 10).padding(.vertical, 7)
         .background(appearance.chrome)
         .foregroundStyle(appearance.chromeText)
+    }
+
+    /// Any command renders as a toolbar button; navigation commands keep their
+    /// live state (disabled arrows, reload-becomes-stop).
+    private func commandButton(_ command: Command) -> some View {
+        var symbol = command.icon
+        var disabled = false
+        switch command {
+        case .goBack: disabled = !(model.activeTab?.canGoBack ?? false)
+        case .goForward: disabled = !(model.activeTab?.canGoForward ?? false)
+        case .reload: if model.activeTab?.isLoading == true { symbol = "xmark" }
+        default: break
+        }
+        return button(symbol) { dispatch(command) }.disabled(disabled).help(command.title)
     }
 
     private func button(_ symbol: String, action: @escaping () -> Void) -> some View {

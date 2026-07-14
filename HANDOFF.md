@@ -82,7 +82,18 @@ Session tabs · drag & drop (reorder, into folders, drag-to-pin/favorite) · per
 color · SF Symbol folder icons · favicons · command palette (⌘K) · shortcut remapping ·
 auto-predict address bar · native blank start page · persistent login + history · custom search
 engine · deep appearance customization + shareable `.runetheme` presets · WCAG auto-contrast ·
-hide traffic lights · code signing.
+hide traffic lights · code signing · **Auto-PiP** (verified 2026-07-14: enter on tab switch,
+return-inline on switch back, manual ⌥⌘P toggle, no PiP leak on tab close) · **app icon**
+(`Assets/Rune-iOS-Default-1024@1x.png` → `.icns` built by dev-run.sh with sips/iconutil;
+Icon Composer source lives in `Assets/Rune.icon`) · **new-tab flow** (behavior: start page /
+home / duplicate / last closed; placement: end / next-to-active; ⌘T focuses an existing start
+page instead of stacking — verified) · **customizable start page** (greeting, favorites grid,
+recents, background — in `Appearance`, round-trips presets) · **customizable toolbar**
+(`Appearance.toolbarButtons` = command rawValues rendered as dispatch buttons — verified live)
+· **compact address bar** (host-only until clicked — verified) · **window restores last
+size, clamped to 900×600 min** (`NSHostingController.sizingOptions = []` was the fix for the
+tiny-launch-window bug: SwiftUI was shrinking the window to its ideal size, and that frame
+got autosaved).
 
 **Built but NOT verified** (needs the owner's Anthropic API key in Settings ▸ Claude):
 all four Claude features — link hover summaries, Ask (⌘J), selection actions, AI address bar.
@@ -105,62 +116,56 @@ requires a **paid** Apple Developer Program membership; confirm enrollment befor
   anything that calls the API.
 - **Screenshots:** `screencapture -o -x /tmp/x.png` from Bash works and bypasses compositor
   filtering; `sips -c H W --cropOffset Y X` to crop.
+- **`open` (and dev-run.sh) reuses a running Rune instance** — you'll be looking at the old
+  build. Quit first: `osascript -e 'quit app id "com.dwjames.Rune"'` (window positioning via
+  System Events also works; only keystrokes are blocked).
+- **The PiP window belongs to the system `PIPAgent` process**, not Rune, so it's invisible in
+  filtered computer-use screenshots. Check it with: `tell application "System Events" to count
+  windows of (every process whose name is "PIPAgent")` — 1 = PiP active, 0 = not.
+- See `.claude/skills/verify/SKILL.md` for the full on-device verification recipe.
 
 ---
 
 ## 7. Next steps (in the owner's priority order)
 
-### A. Auto Picture-in-Picture — harden it
+### A. Auto Picture-in-Picture — ✅ DONE (2026-07-14, verified on-device)
 
-**Current state:** `Tab.requestPiPIfPlaying()` (in `Browser.swift`) is called on the *outgoing*
-tab from `BrowserModel.select(_:)`. It evaluates JS that finds a playing `<video>` and calls
-`requestPictureInPicture()`. The web view config also sets the private
-`preferences.setValue(true, forKey: "allowsPictureInPictureMediaPlayback")`.
+**Root cause was not user activation:** WebKit never implemented the W3C PiP API —
+`document.pictureInPictureEnabled` is `undefined` in WKWebView, so the old JS condition
+silently never fired. WebKit's real API is `video.webkitSetPresentationMode('picture-in-picture')`,
+which needs no gesture. `Tab` (Browser.swift) now uses it (W3C kept as fallback) and NSLogs
+each attempt's outcome.
 
-**Why it may not fire:** `HTMLVideoElement.requestPictureInPicture()` normally requires
-**transient user activation**. Switching tabs is not a gesture the page sees, so WebKit can
-reject the call. This has never been confirmed working — treat it as unproven.
+**Shipped:** Auto-PiP setting in Settings ▸ Browsing ▸ Media (`AutoPiPMode` in Stores.swift:
+off / tab switch / tab switch + leaving Rune, via `applicationDidResignActive`) · "return
+video to the page when you come back" toggle (`exitPiPIfActive` on select) · manual
+`togglePiP` Command (⌥⌘P, View menu) · `closeAllMediaPresentations` on tab close/unload
+(no PiP leak — verified). Possible later: per-site allowlist.
 
-**Suggested plan:**
-1. Reproduce: play a YouTube/Vimeo video, switch tabs, watch for a WebKit console error
-   (`NotAllowedError`). Add a temporary JS→Swift log through `PageBridge` to see the rejection.
-2. Try, in order: (a) the Document Picture-in-Picture API (`documentPictureInPicture.requestWindow()`),
-   (b) invoking PiP from inside a real user-gesture handler and keeping the handle, (c) WebKit's
-   own media controls / `_WKWebView` SPI if a supported path doesn't exist.
-3. Expose it as a setting (`Appearance` or a new `Behavior` struct): **Auto-PiP: off / on tab
-   switch / on window blur**, plus a per-site allowlist later.
-4. Also wire `webView.closeAllMediaPresentations()` when a tab is closed so PiP windows don't leak.
+### B. New tab flow — ✅ DONE (2026-07-14, verified on-device)
 
-### B. New tab flow
+Shipped: `NewTabBehavior` + `NewTabPlacement` in Stores.swift, surfaced in
+Settings ▸ Browsing ▸ New Tabs · `lastClosedURL` tracked on close/unload · ⌘T focuses an
+existing empty start page (`.focusStartPage` notification) instead of stacking · start page
+customization (greeting, favorites grid, recents, background) via `Appearance` fields.
 
-**Current state:** `BrowserModel.newTab()` creates a blank tab with **no URL**;
-`TabContent` shows the native `StartPage` (centered "Rune" + search field) whenever
-`urlString.isEmpty && !isLoading`. Deliberately does **not** load a third-party page.
+**Still open from B:** "open in split" and ⌘-click → background tab (popups always
+foreground — see `adoptPopup` in `Browser.swift`).
 
-**Where to take it (ask the owner to pick):**
-- New-tab behavior setting: blank start page / home URL / duplicate current / last closed.
-- Make the start page itself customizable: favorites grid, recent history, custom background
-  or color, layout density, optional greeting — all driven from `Appearance`/a new `StartPage`
-  config so it round-trips through presets.
-- New-tab **placement**: at end vs. next to active (there's already a Helium-era notion of this
-  in the owner's head — implement as a setting).
-- ⌘T while a start page is already open should focus it rather than pile up empty tabs.
-- Consider "open in split" and ⌘-click → background tab (currently popups always foreground —
-  see `adoptPopup` in `Browser.swift`).
+### C. More layout customization — toolbar part ✅ DONE (2026-07-14)
 
-### C. More layout customization
+Shipped: `Appearance.toolbarButtons` (any Command as a toolbar button, user-composable,
+verified live) · `compactAddressBar` (host-only display until clicked) · **Appearance now
+decodes with per-field defaults** (`init(from:)` with `decodeIfPresent`), so adding knobs
+never resets saved themes — but note the memberwise init is gone; build presets by mutating
+`var a = Appearance()`.
 
-**Current `Appearance` knobs:** accent, sidebar/toolbar/background colors, font family, font
-size, text color (auto-contrast or custom), sidebar width, corner radius, sidebar side,
-hide traffic lights.
-
-**Obvious next knobs:**
-- **Toolbar**: show/hide individual buttons, compact mode, centered address bar, hide toolbar
+**Remaining knob ideas:**
+- **Toolbar**: reorder buttons (currently check-order), centered address bar, hide toolbar
   entirely (zen).
 - **Sidebar**: row height/density, section order, hide a whole section (e.g. no Favorites),
   collapse-to-icons, auto-hide/overlay mode.
 - **Window**: background material/vibrancy, translucency, full-size content behavior.
-- **Start page**: see (B).
 - **Per-space theming** later, if spaces land.
 
 **How to add a knob (the pattern):** add the field to `Appearance` (Codable → it lands in
@@ -172,6 +177,7 @@ to `Command` instead so it gets a menu item + remappable shortcut automatically.
 
 ## 8. Suggested first move in the new session
 
-Ask the owner whether they've put an API key in Settings ▸ Claude yet — if yes, verify the four
-Claude features actually work before adding anything new. Then start on Auto-PiP (A), since it's
-the only *committed* feature still unproven.
+Ask the owner whether they've put an API key in Settings ▸ Claude yet (still absent as of
+2026-07-14) — if yes, verify the four Claude features actually work before adding anything
+new. Then pick up the remaining items in (B)/(C) above, or Apple Passwords if enrollment is
+sorted. Read `.claude/skills/verify/SKILL.md` before driving the app.

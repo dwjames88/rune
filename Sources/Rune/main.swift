@@ -29,12 +29,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.title = "Rune"
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        window.center()
-        window.setFrameAutosaveName("RuneMainWindow")
-        window.contentViewController = NSHostingController(
+        let hosting = NSHostingController(
             rootView: BrowserView(model: model, dispatch: { [weak self] in self?.dispatch($0) })
                 .environmentObject(appearance))
-        window.minSize = NSSize(width: 720, height: 480)
+        hosting.sizingOptions = []   // never let SwiftUI shrink the window to its ideal size
+        window.contentViewController = hosting
+        window.minSize = NSSize(width: 900, height: 600)
+        // Reopen at the last size/position; first launch gets a generous default.
+        // Clamp to minSize — frames autosaved by older builds could be tiny.
+        if window.setFrameUsingName("RuneMainWindow") {
+            var frame = window.frame
+            if frame.width < window.minSize.width || frame.height < window.minSize.height {
+                frame.size.width = max(frame.width, window.minSize.width)
+                frame.size.height = max(frame.height, window.minSize.height)
+                window.setFrame(frame, display: false)
+            }
+        } else {
+            window.setContentSize(NSSize(width: 1280, height: 820))
+            window.center()
+        }
+        window.setFrameAutosaveName("RuneMainWindow")
         window.makeKeyAndOrderFront(nil)
         self.window = window
         applyWindowChrome()
@@ -52,6 +66,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) { model.persist() }
+
+    // Auto-PiP on leaving the app (the "window blur" case). App-level rather
+    // than window-level so opening Settings or the palette doesn't trigger it.
+    func applicationDidResignActive(_ notification: Notification) {
+        if settings.autoPiP == .tabSwitchAndAppSwitch { model.activeTab?.requestPiPIfPlaying() }
+    }
+    func applicationDidBecomeActive(_ notification: Notification) {
+        if settings.autoPiP == .tabSwitchAndAppSwitch, settings.autoPiPReturnInline {
+            model.activeTab?.exitPiPIfActive()
+        }
+    }
+
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     @objc private func applyWindowChrome() {
@@ -127,6 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .goForward: model.goForward()
         case .focusAddress: NotificationCenter.default.post(name: .focusAddressBar, object: nil)
         case .toggleSidebar: model.sidebarVisible.toggle()
+        case .togglePiP: model.activeTab?.togglePiP()
         case .pinTab: if let t = model.activeTab { model.pin(t) }
         case .nextTab: model.selectAdjacentSession(1)
         case .previousTab: model.selectAdjacentSession(-1)

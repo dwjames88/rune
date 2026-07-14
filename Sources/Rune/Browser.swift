@@ -89,11 +89,76 @@ final class Tab: ObservableObject, Identifiable {
 
     func load(_ url: URL) { webView.load(URLRequest(url: url)) }
 
+    // MARK: Picture in Picture
+    //
+    // WebKit does not implement the W3C Picture-in-Picture API
+    // (document.pictureInPictureEnabled is undefined) — its native path is
+    // video.webkitSetPresentationMode('picture-in-picture'), which also works
+    // without transient user activation. Keep the W3C call as a fallback in
+    // case WebKit ever ships it.
+
+    private static let enterPiPJS = """
+    (function(){
+      const vids=[...document.querySelectorAll('video')];
+      if(vids.some(v=>v.webkitPresentationMode==='picture-in-picture')||document.pictureInPictureElement){return 'already-pip';}
+      const v=vids.find(v=>!v.paused&&!v.ended&&v.readyState>2);
+      if(!v){return 'no-playing-video';}
+      if(v.webkitSupportsPresentationMode&&v.webkitSupportsPresentationMode('picture-in-picture')){
+        v.webkitSetPresentationMode('picture-in-picture');return 'webkit';
+      }
+      if(document.pictureInPictureEnabled&&v.requestPictureInPicture){
+        v.requestPictureInPicture().catch(e=>{});return 'w3c';
+      }
+      return 'unsupported';
+    })();
+    """
+
+    private static let exitPiPJS = """
+    (function(){
+      const v=[...document.querySelectorAll('video')].find(v=>v.webkitPresentationMode==='picture-in-picture');
+      if(v){v.webkitSetPresentationMode('inline');return 'webkit';}
+      if(document.pictureInPictureElement){document.exitPictureInPicture().catch(e=>{});return 'w3c';}
+      return 'none';
+    })();
+    """
+
     func requestPiPIfPlaying() {
+        webView.evaluateJavaScript(Self.enterPiPJS) { result, error in
+            if let error { NSLog("Rune PiP enter failed: %@", error.localizedDescription) }
+            else { NSLog("Rune PiP enter: %@", result as? String ?? "?") }
+        }
+    }
+
+    /// Bring a PiP'd video back into the page (used when its tab is reselected).
+    func exitPiPIfActive() {
+        webView.evaluateJavaScript(Self.exitPiPJS) { result, error in
+            if let error { NSLog("Rune PiP exit failed: %@", error.localizedDescription) }
+        }
+    }
+
+    /// Manual toggle: exit if a video is in PiP, otherwise send one there.
+    /// Unlike the automatic path, a paused video qualifies too.
+    func togglePiP() {
         webView.evaluateJavaScript("""
-        (function(){const v=[...document.querySelectorAll('video')].find(v=>!v.paused&&!v.ended&&v.readyState>2);
-        if(v&&document.pictureInPictureEnabled&&!document.pictureInPictureElement){v.requestPictureInPicture().catch(()=>{});}})();
-        """)
+        (function(){
+          const vids=[...document.querySelectorAll('video')];
+          const active=vids.find(v=>v.webkitPresentationMode==='picture-in-picture');
+          if(active){active.webkitSetPresentationMode('inline');return 'exited';}
+          if(document.pictureInPictureElement){document.exitPictureInPicture().catch(e=>{});return 'exited';}
+          const v=vids.find(v=>!v.paused&&!v.ended&&v.readyState>2)||vids.find(v=>v.readyState>2);
+          if(!v){return 'no-video';}
+          if(v.webkitSupportsPresentationMode&&v.webkitSupportsPresentationMode('picture-in-picture')){
+            v.webkitSetPresentationMode('picture-in-picture');return 'entered';
+          }
+          if(document.pictureInPictureEnabled&&v.requestPictureInPicture){
+            v.requestPictureInPicture().catch(e=>{});return 'entered';
+          }
+          return 'unsupported';
+        })();
+        """) { result, error in
+            if let error { NSLog("Rune PiP toggle failed: %@", error.localizedDescription) }
+            else { NSLog("Rune PiP toggle: %@", result as? String ?? "?") }
+        }
     }
 }
 
@@ -163,19 +228,49 @@ final class BrowserModel: ObservableObject {
 
     // MARK: Session tabs
 
+    /// URL of the most recently closed tab (for the "last closed" new-tab behavior).
+    private(set) var lastClosedURL: String?
+
     @discardableResult
     func newTab(url: URL? = nil, select: Bool = true) -> Tab {
+        // ⌘T with a start page already open focuses it instead of stacking blanks.
+        if url == nil, settings.newTabBehavior == .startPage,
+           let empty = sessionTabs.first(where: { $0.urlString.isEmpty && !$0.isLoading }) {
+            if select { self.select(.session(empty.id)) }
+            NotificationCenter.default.post(name: .focusStartPage, object: nil)
+            return empty
+        }
         let tab = Tab(webView: makeWebView())
-        sessionTabs.append(tab)
-        if let url { tab.load(url) }
+        let target = url ?? defaultNewTabURL()
+        insertSession(tab)
+        if let target { tab.load(target) }
         if select { self.select(.session(tab.id)) }
         return tab
+    }
+
+    private func defaultNewTabURL() -> URL? {
+        switch settings.newTabBehavior {
+        case .startPage: nil
+        case .homePage: resolve(settings.homePageURL)
+        case .duplicateCurrent: activeTab?.webView.url
+        case .lastClosed: lastClosedURL.flatMap { URL(string: $0) }
+        }
+    }
+
+    private func insertSession(_ tab: Tab) {
+        if settings.newTabPlacement == .nextToActive,
+           case .session(let id)? = selection,
+           let i = sessionTabs.firstIndex(where: { $0.id == id }) {
+            sessionTabs.insert(tab, at: i + 1)
+        } else {
+            sessionTabs.append(tab)
+        }
     }
 
     func adoptPopup(configuration: WKWebViewConfiguration) -> WKWebView {
         let webView = makeWebView(configuration: configuration)
         let tab = Tab(webView: webView)
-        sessionTabs.append(tab)
+        insertSession(tab)
         select(.session(tab.id))
         return webView
     }
@@ -183,7 +278,8 @@ final class BrowserModel: ObservableObject {
     // MARK: Selection
 
     func select(_ new: Selection) {
-        if let current = activeTab { current.requestPiPIfPlaying() }
+        guard new != selection else { return }
+        if settings.autoPiP != .off, let current = activeTab { current.requestPiPIfPlaying() }
         if case .saved(let id) = new, openTabs[id] == nil, let saved = savedTab(id) {
             let tab = Tab(webView: makeWebView())
             tab.savedID = id
@@ -194,6 +290,7 @@ final class BrowserModel: ObservableObject {
             if let url = URL(string: saved.url) { tab.load(url) }
         }
         selection = new
+        if settings.autoPiPReturnInline { activeTab?.exitPiPIfActive() }
     }
 
     func savedTab(_ id: UUID) -> SavedTab? {
@@ -203,7 +300,9 @@ final class BrowserModel: ObservableObject {
     // MARK: Close / unload
 
     func close(session tab: Tab) {
+        if let url = tab.webView.url { lastClosedURL = url.absoluteString }
         tab.webView.stopLoading()
+        tab.webView.closeAllMediaPresentations {}   // don't leak a PiP window
         sessionTabs.removeAll { $0.id == tab.id }
         if selection == .session(tab.id) {
             selection = sessionTabs.last.map { .session($0.id) } ?? pinned.first.map { .saved($0.id) }
@@ -220,7 +319,9 @@ final class BrowserModel: ObservableObject {
 
     /// Unload a saved entry's live tab (keeps the row).
     func unload(savedID: UUID) {
+        if let url = openTabs[savedID]?.webView.url { lastClosedURL = url.absoluteString }
         openTabs[savedID]?.webView.stopLoading()
+        openTabs[savedID]?.webView.closeAllMediaPresentations {}   // don't leak a PiP window
         openTabs[savedID] = nil
         if selection == .saved(savedID) { selection = nil }
     }

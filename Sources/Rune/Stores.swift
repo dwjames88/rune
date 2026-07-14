@@ -48,22 +48,88 @@ struct SearchEngine: Codable, Hashable, Identifiable {
 
 // MARK: - Settings
 
+/// When a playing video should automatically pop into Picture in Picture.
+enum AutoPiPMode: String, Codable, CaseIterable, Identifiable {
+    case off
+    case tabSwitch
+    case tabSwitchAndAppSwitch
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .off: "Off"
+        case .tabSwitch: "When switching tabs"
+        case .tabSwitchAndAppSwitch: "Tab switch + leaving Rune"
+        }
+    }
+}
+
+/// What a fresh tab opens with.
+enum NewTabBehavior: String, Codable, CaseIterable, Identifiable {
+    case startPage, homePage, duplicateCurrent, lastClosed
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .startPage: "Start page"
+        case .homePage: "Home page"
+        case .duplicateCurrent: "Duplicate current tab"
+        case .lastClosed: "Last closed tab"
+        }
+    }
+}
+
+/// Where a fresh tab lands in the session list.
+enum NewTabPlacement: String, Codable, CaseIterable, Identifiable {
+    case end, nextToActive
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .end: "At the end"
+        case .nextToActive: "Next to the active tab"
+        }
+    }
+}
+
 @MainActor
 final class SettingsStore: ObservableObject {
     @Published var searchEngine: SearchEngine { didSet { save() } }
     @Published var customEngines: [SearchEngine] { didSet { save() } }
+    @Published var autoPiP: AutoPiPMode { didSet { save() } }
+    /// Bring a PiP'd video back into the page when you return to its tab.
+    @Published var autoPiPReturnInline: Bool { didSet { save() } }
+    @Published var newTabBehavior: NewTabBehavior { didSet { save() } }
+    @Published var homePageURL: String { didSet { save() } }
+    @Published var newTabPlacement: NewTabPlacement { didSet { save() } }
 
     var allEngines: [SearchEngine] { SearchEngine.presets + customEngines }
 
-    private struct Payload: Codable { var searchEngine: SearchEngine; var customEngines: [SearchEngine] }
+    private struct Payload: Codable {
+        var searchEngine: SearchEngine
+        var customEngines: [SearchEngine]
+        // Optionals: absent in older settings.json
+        var autoPiP: AutoPiPMode?
+        var autoPiPReturnInline: Bool?
+        var newTabBehavior: NewTabBehavior?
+        var homePageURL: String?
+        var newTabPlacement: NewTabPlacement?
+    }
 
     init() {
         let saved = Storage.loadJSON(Payload.self, from: "settings.json")
         searchEngine = saved?.searchEngine ?? SearchEngine.presets[0]
         customEngines = saved?.customEngines ?? []
+        autoPiP = saved?.autoPiP ?? .tabSwitch
+        autoPiPReturnInline = saved?.autoPiPReturnInline ?? true
+        newTabBehavior = saved?.newTabBehavior ?? .startPage
+        homePageURL = saved?.homePageURL ?? ""
+        newTabPlacement = saved?.newTabPlacement ?? .end
     }
     private func save() {
-        Storage.saveJSON(Payload(searchEngine: searchEngine, customEngines: customEngines), to: "settings.json")
+        Storage.saveJSON(Payload(searchEngine: searchEngine, customEngines: customEngines,
+                                 autoPiP: autoPiP, autoPiPReturnInline: autoPiPReturnInline,
+                                 newTabBehavior: newTabBehavior, homePageURL: homePageURL,
+                                 newTabPlacement: newTabPlacement),
+                         to: "settings.json")
     }
 }
 
@@ -210,4 +276,5 @@ extension Notification.Name {
     static let showCommandPalette = Notification.Name("rune.showCommandPalette")
     static let focusAddressBar = Notification.Name("rune.focusAddressBar")
     static let showAskBar = Notification.Name("rune.showAskBar")
+    static let focusStartPage = Notification.Name("rune.focusStartPage")
 }

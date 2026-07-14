@@ -14,6 +14,7 @@ enum Command: String, CaseIterable, Identifiable {
     case goForward
     case focusAddress
     case toggleSidebar
+    case togglePiP
     case pinTab
     case nextTab
     case previousTab
@@ -32,6 +33,7 @@ enum Command: String, CaseIterable, Identifiable {
         case .goForward: "Forward"
         case .focusAddress: "Open Location…"
         case .toggleSidebar: "Toggle Sidebar"
+        case .togglePiP: "Toggle Picture in Picture"
         case .pinTab: "Pin / Unpin Tab"
         case .nextTab: "Next Tab"
         case .previousTab: "Previous Tab"
@@ -51,6 +53,7 @@ enum Command: String, CaseIterable, Identifiable {
         case .goForward: "chevron.right"
         case .focusAddress: "magnifyingglass"
         case .toggleSidebar: "sidebar.left"
+        case .togglePiP: "pip"
         case .pinTab: "pin"
         case .nextTab: "arrow.right.to.line"
         case .previousTab: "arrow.left.to.line"
@@ -62,7 +65,7 @@ enum Command: String, CaseIterable, Identifiable {
     var menu: MenuSection {
         switch self {
         case .newTab, .closeTab, .pinTab: .file
-        case .reload, .toggleSidebar, .commandPalette, .askPage: .view
+        case .reload, .toggleSidebar, .togglePiP, .commandPalette, .askPage: .view
         case .goBack, .goForward: .history
         case .focusAddress, .nextTab, .previousTab: .navigate
         case .openSettings: .app
@@ -81,6 +84,7 @@ enum Command: String, CaseIterable, Identifiable {
         case .goForward: ("]", .command)
         case .focusAddress: ("l", .command)
         case .toggleSidebar: ("s", [.command, .option])
+        case .togglePiP: ("p", [.command, .option])
         case .pinTab: ("d", .command)
         case .nextTab: ("]", [.command, .shift])
         case .previousTab: ("[", [.command, .shift])

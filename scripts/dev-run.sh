@@ -12,8 +12,27 @@ BIN="$(swift build -c "$CONFIG" --show-bin-path)/Rune"
 
 APP="$REPO_ROOT/.build/Rune.app"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Rune"
+
+# App icon: build Rune.icns from the 1024px master with system tools only.
+# Cached in .build and regenerated whenever the PNG changes.
+ICON_SRC="$REPO_ROOT/Assets/Rune-iOS-Default-1024@1x.png"
+ICNS="$REPO_ROOT/.build/Rune.icns"
+if [ -f "$ICON_SRC" ]; then
+    if [ ! -f "$ICNS" ] || [ "$ICON_SRC" -nt "$ICNS" ]; then
+        ICONSET="$(mktemp -d)/Rune.iconset"
+        mkdir -p "$ICONSET"
+        for size in 16 32 128 256 512; do
+            sips -z "$size" "$size" "$ICON_SRC" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+            double=$((size * 2))
+            sips -z "$double" "$double" "$ICON_SRC" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+        done
+        iconutil -c icns "$ICONSET" -o "$ICNS"
+        rm -rf "$(dirname "$ICONSET")"
+    fi
+    cp "$ICNS" "$APP/Contents/Resources/Rune.icns"
+fi
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -26,6 +45,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleExecutable</key><string>Rune</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
+    <key>CFBundleIconFile</key><string>Rune</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>UTExportedTypeDeclarations</key>
