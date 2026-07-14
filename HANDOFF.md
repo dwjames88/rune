@@ -84,8 +84,10 @@ auto-predict address bar · native blank start page · persistent login + histor
 engine · deep appearance customization + shareable `.runetheme` presets · WCAG auto-contrast ·
 hide traffic lights · code signing · **Auto-PiP** (verified 2026-07-14: enter on tab switch,
 return-inline on switch back, manual ⌥⌘P toggle, no PiP leak on tab close) · **app icon**
-(`Assets/Rune-iOS-Default-1024@1x.png` → `.icns` built by dev-run.sh with sips/iconutil;
-Icon Composer source lives in `Assets/Rune.icon`) · **new-tab flow** (behavior: start page /
+(dev-run.sh compiles `Assets/Rune.icon` with **actool** → `Assets.car` + legacy `Rune.icns`
++ `CFBundleIconName`; sips/iconutil PNG fallback if actool is missing) · **custom app icon
+setting** (Appearance ▸ App Icon: `AppIconRenderer` draws the rune glyph polygon natively in
+any colors, applied via `NSApp.applicationIconImage`, off = bundled icon — verified in Dock) · **new-tab flow** (behavior: start page /
 home / duplicate / last closed; placement: end / next-to-active; ⌘T focuses an existing start
 page instead of stacking — verified) · **customizable start page** (greeting, favorites grid,
 recents, background — in `Appearance`, round-trips presets) · **customizable toolbar**
@@ -95,8 +97,13 @@ size, clamped to 900×600 min** (`NSHostingController.sizingOptions = []` was th
 tiny-launch-window bug: SwiftUI was shrinking the window to its ideal size, and that frame
 got autosaved).
 
-**Built but NOT verified** (needs the owner's Anthropic API key in Settings ▸ Claude):
-all four Claude features — link hover summaries, Ask (⌘J), selection actions, AI address bar.
+**Claude features — all four verified on-device 2026-07-14** (owner's API key is in the
+Keychain): link hover summaries · selection Explain/Summarize/Translate · Ask bar (⌘J,
+streams, answers honestly when the page lacks the answer) · AI address bar ("that yeti
+enduro bike review" → found and opened the right history page). Also shipped + verified:
+**configurable hover delay** (Settings ▸ Claude ▸ Link Previews: on/off + 0.1–2.0 s slider;
+baked into the injected PageBridge script for new pages, pushed live to open pages via
+`window.__runeHoverMs` / `__runeHoverOff` — see `BrowserModel.applyHoverSettings`).
 
 **Not started:** Apple Passwords (needs the AutoFill Credential Provider entitlement — likely
 requires a **paid** Apple Developer Program membership; confirm enrollment before starting).
@@ -177,7 +184,7 @@ to `Command` instead so it gets a menu item + remappable shortcut automatically.
 
 ## 8. Suggested first move in the new session
 
-Ask the owner whether they've put an API key in Settings ▸ Claude yet (still absent as of
-2026-07-14) — if yes, verify the four Claude features actually work before adding anything
-new. Then pick up the remaining items in (B)/(C) above, or Apple Passwords if enrollment is
-sorted. Read `.claude/skills/verify/SKILL.md` before driving the app.
+Everything committed through the app-icon work is verified; Claude features are verified
+too. Pick up the remaining items in (B)/(C) above (⌘-click background tabs, split view,
+sidebar/window knobs, toolbar reorder), or Apple Passwords if Developer Program enrollment
+is sorted. Read `.claude/skills/verify/SKILL.md` before driving the app.

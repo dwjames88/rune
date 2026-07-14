@@ -55,7 +55,7 @@ private struct RuneSettingsView: View {
             case .appearance: AppearancePane(appearance: appearance)
             case .presets: PresetsPane(appearance: appearance)
             case .browsing: BrowsingPane(settings: settings, history: history)
-            case .claude: ClaudePane(claude: claude)
+            case .claude: ClaudePane(claude: claude, settings: settings)
             case .shortcuts: ShortcutsPane(shortcuts: shortcuts)
             }
         }
@@ -131,6 +131,23 @@ private struct AppearancePane: View {
                 Toggle("Show recent history", isOn: a.startPageShowRecents)
                 ColorTokenRow(label: "Background", token: a.startPageBackground)
             }
+            Section {
+                HStack(spacing: 14) {
+                    Image(nsImage: appIconPreview)
+                        .resizable().scaledToFit().frame(width: 56, height: 56)
+                    Toggle("Custom app icon", isOn: customIconOn)
+                    Spacer()
+                }
+                if appearance.appearance.appIconBackground != "default" {
+                    ColorTokenRow(label: "Background", token: a.appIconBackground, allowSystem: false)
+                    ColorTokenRow(label: "Rune", token: a.appIconGlyph, allowSystem: false)
+                }
+            } header: {
+                Text("App Icon")
+            } footer: {
+                Text("Custom icons are drawn from the rune glyph in your colors and apply to the Dock while Rune runs. Off = the bundled icon.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Window") {
                 Toggle("Hide traffic lights", isOn: a.hideTrafficLights)
                 Text("Hides the red/yellow/green buttons. Drag the toolbar to move the window; ⌘W / ⌘M still work.")
@@ -141,6 +158,20 @@ private struct AppearancePane: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var customIconOn: Binding<Bool> {
+        Binding(
+            get: { appearance.appearance.appIconBackground != "default" },
+            set: { on in
+                appearance.appearance.appIconBackground = on ? "#48D4EA" : "default"
+                appearance.appearance.appIconGlyph = on ? "#002678" : "default"
+            })
+    }
+
+    private var appIconPreview: NSImage {
+        AppIconRenderer.custom(for: appearance.appearance, size: 256)
+            ?? (NSImage(named: NSImage.applicationIconName) ?? NSImage())
     }
 
     /// Membership toggle for a command in the toolbar button list — checking
@@ -378,6 +409,7 @@ private final class RecorderNSView: NSView {
 
 private struct ClaudePane: View {
     @ObservedObject var claude: ClaudeService
+    @ObservedObject var settings: SettingsStore
     @State private var key = ""
     @State private var saved = false
 
@@ -405,6 +437,24 @@ private struct ClaudePane: View {
                 Text("Anthropic API Key")
             } footer: {
                 Text("Stored in the macOS Keychain — never in Rune's settings files, and never sent anywhere but api.anthropic.com. Get a key at console.anthropic.com.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle("Summarize links on hover", isOn: $settings.linkHoverEnabled)
+                if settings.linkHoverEnabled {
+                    HStack {
+                        Text("Hover delay")
+                        Slider(value: $settings.linkHoverDelay, in: 0.1...10.0, step: 0.05)
+                        Text(String(format: "%.2f s", settings.linkHoverDelay))
+                            .monospacedDigit().foregroundStyle(.secondary)
+                            .frame(width: 52, alignment: .trailing)
+                    }
+                }
+            } header: {
+                Text("Link Previews")
+            } footer: {
+                Text("How long a link must sit under your cursor before Claude summarizes it. Applies immediately, even to open pages.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 

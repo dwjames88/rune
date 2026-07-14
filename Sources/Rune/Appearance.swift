@@ -39,6 +39,11 @@ struct Appearance: Codable, Equatable {
     // Window
     var hideTrafficLights = false
 
+    // App icon: "default" = the bundled Icon Composer icon; a hex on either
+    // token switches to a natively-rendered variant (see AppIconRenderer).
+    var appIconBackground = "default"
+    var appIconGlyph = "default"
+
     static let `default` = Appearance()
 
     // Decode with a default for every missing key, so adding a knob never
@@ -50,6 +55,7 @@ struct Appearance: Codable, Equatable {
         case toolbarButtons, compactAddressBar
         case startPageGreeting, startPageShowFavorites, startPageShowRecents, startPageBackground
         case hideTrafficLights
+        case appIconBackground, appIconGlyph
     }
 
     init() {}
@@ -74,6 +80,8 @@ struct Appearance: Codable, Equatable {
         startPageShowRecents = try c.decodeIfPresent(Bool.self, forKey: .startPageShowRecents) ?? d.startPageShowRecents
         startPageBackground = try c.decodeIfPresent(String.self, forKey: .startPageBackground) ?? d.startPageBackground
         hideTrafficLights = try c.decodeIfPresent(Bool.self, forKey: .hideTrafficLights) ?? d.hideTrafficLights
+        appIconBackground = try c.decodeIfPresent(String.self, forKey: .appIconBackground) ?? d.appIconBackground
+        appIconGlyph = try c.decodeIfPresent(String.self, forKey: .appIconGlyph) ?? d.appIconGlyph
     }
 }
 

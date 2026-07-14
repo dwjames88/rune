@@ -100,6 +100,9 @@ final class SettingsStore: ObservableObject {
     @Published var newTabBehavior: NewTabBehavior { didSet { save() } }
     @Published var homePageURL: String { didSet { save() } }
     @Published var newTabPlacement: NewTabPlacement { didSet { save() } }
+    /// Claude link previews: hover a link this long before the summary appears.
+    @Published var linkHoverEnabled: Bool { didSet { save(); hoverChanged() } }
+    @Published var linkHoverDelay: Double { didSet { save(); hoverChanged() } }
 
     var allEngines: [SearchEngine] { SearchEngine.presets + customEngines }
 
@@ -112,6 +115,8 @@ final class SettingsStore: ObservableObject {
         var newTabBehavior: NewTabBehavior?
         var homePageURL: String?
         var newTabPlacement: NewTabPlacement?
+        var linkHoverEnabled: Bool?
+        var linkHoverDelay: Double?
     }
 
     init() {
@@ -123,13 +128,19 @@ final class SettingsStore: ObservableObject {
         newTabBehavior = saved?.newTabBehavior ?? .startPage
         homePageURL = saved?.homePageURL ?? ""
         newTabPlacement = saved?.newTabPlacement ?? .end
+        linkHoverEnabled = saved?.linkHoverEnabled ?? true
+        linkHoverDelay = saved?.linkHoverDelay ?? 0.45
     }
     private func save() {
         Storage.saveJSON(Payload(searchEngine: searchEngine, customEngines: customEngines,
                                  autoPiP: autoPiP, autoPiPReturnInline: autoPiPReturnInline,
                                  newTabBehavior: newTabBehavior, homePageURL: homePageURL,
-                                 newTabPlacement: newTabPlacement),
+                                 newTabPlacement: newTabPlacement,
+                                 linkHoverEnabled: linkHoverEnabled, linkHoverDelay: linkHoverDelay),
                          to: "settings.json")
+    }
+    private func hoverChanged() {
+        NotificationCenter.default.post(name: .hoverSettingsChanged, object: nil)
     }
 }
 
@@ -277,4 +288,5 @@ extension Notification.Name {
     static let focusAddressBar = Notification.Name("rune.focusAddressBar")
     static let showAskBar = Notification.Name("rune.showAskBar")
     static let focusStartPage = Notification.Name("rune.focusStartPage")
+    static let hoverSettingsChanged = Notification.Name("rune.hoverSettingsChanged")
 }

@@ -20,16 +20,23 @@ struct SelectionTarget: Equatable {
 enum PageBridge {
     static let handlerName = "rune"
 
-    static var userScript: WKUserScript {
-        WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: false)
+    /// The bridge script with the hover settings baked in for fresh pages;
+    /// `window.__runeHoverMs` / `__runeHoverOff` override live (see
+    /// BrowserModel.applyHoverSettings) so a settings change doesn't need a reload.
+    static func userScript(hoverDelayMs: Int, hoverEnabled: Bool) -> WKUserScript {
+        WKUserScript(source: source(hoverDelayMs: hoverDelayMs, hoverEnabled: hoverEnabled),
+                     injectionTime: .atDocumentEnd, forMainFrameOnly: false)
     }
 
-    private static let source = """
+    private static func source(hoverDelayMs: Int, hoverEnabled: Bool) -> String { """
     (function () {
       const post = (m) => { try { window.webkit.messageHandlers.rune.postMessage(m); } catch (e) {} };
       let timer = null;
+      const hoverMs = () => window.__runeHoverMs !== undefined ? window.__runeHoverMs : \(hoverDelayMs);
+      const hoverOff = () => window.__runeHoverOff !== undefined ? window.__runeHoverOff : \(hoverEnabled ? "false" : "true");
 
       document.addEventListener('mouseover', (e) => {
+        if (hoverOff()) return;
         const a = e.target.closest && e.target.closest('a[href]');
         if (!a) return;
         const href = a.href;
@@ -38,7 +45,7 @@ enum PageBridge {
         timer = setTimeout(() => {
           const r = a.getBoundingClientRect();
           post({ type: 'linkHover', href: href, x: r.left, y: r.bottom });
-        }, 450);
+        }, hoverMs());
       }, true);
 
       document.addEventListener('mouseout', (e) => {
@@ -61,7 +68,7 @@ enum PageBridge {
 
       document.addEventListener('scroll', () => post({ type: 'linkOut' }), true);
     })();
-    """
+    """ }
 
     /// Readable text of the current page, for "ask about this page".
     static let pageTextJS = """

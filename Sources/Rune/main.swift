@@ -86,6 +86,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             window?.standardWindowButton(kind)?.isHidden = hidden
         }
+        // Custom app icon (nil = back to the bundle's Icon Composer icon).
+        NSApp.applicationIconImage = AppIconRenderer.custom(for: appearance.appearance)
     }
 
     // MARK: Menu (from the command registry + current shortcut overrides)

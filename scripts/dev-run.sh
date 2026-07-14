@@ -15,11 +15,27 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Rune"
 
-# App icon: build Rune.icns from the 1024px master with system tools only.
-# Cached in .build and regenerated whenever the PNG changes.
+# App icon. Preferred path: compile the Icon Composer bundle (Assets/Rune.icon)
+# with actool — produces Assets.car (the real layered icon on macOS 26+) plus a
+# legacy Rune.icns. Falls back to sips/iconutil from the 1024px PNG when the
+# Xcode tools aren't available. Cached in .build until the source changes.
+ICON_COMPOSER="$REPO_ROOT/Assets/Rune.icon"
 ICON_SRC="$REPO_ROOT/Assets/Rune-iOS-Default-1024@1x.png"
-ICNS="$REPO_ROOT/.build/Rune.icns"
-if [ -f "$ICON_SRC" ]; then
+ICON_CACHE="$REPO_ROOT/.build/icon"
+if [ -d "$ICON_COMPOSER" ] && xcrun --find actool >/dev/null 2>&1; then
+    if [ ! -f "$ICON_CACHE/Assets.car" ] || \
+       [ -n "$(find "$ICON_COMPOSER" -newer "$ICON_CACHE/Assets.car" 2>/dev/null)" ]; then
+        mkdir -p "$ICON_CACHE"
+        xcrun actool \
+            --app-icon Rune --include-all-app-icons \
+            --compile "$ICON_CACHE" \
+            --platform macosx --minimum-deployment-target 26.0 \
+            --output-partial-info-plist "$ICON_CACHE/partial.plist" \
+            "$ICON_COMPOSER" >/dev/null
+    fi
+    cp "$ICON_CACHE/Assets.car" "$ICON_CACHE/Rune.icns" "$APP/Contents/Resources/"
+elif [ -f "$ICON_SRC" ]; then
+    ICNS="$REPO_ROOT/.build/Rune.icns"
     if [ ! -f "$ICNS" ] || [ "$ICON_SRC" -nt "$ICNS" ]; then
         ICONSET="$(mktemp -d)/Rune.iconset"
         mkdir -p "$ICONSET"
@@ -46,6 +62,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
     <key>CFBundleIconFile</key><string>Rune</string>
+    <key>CFBundleIconName</key><string>Rune</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>UTExportedTypeDeclarations</key>

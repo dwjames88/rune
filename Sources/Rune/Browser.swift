@@ -201,8 +201,28 @@ final class BrowserModel: ObservableObject {
         }
 
         // Claude's page bridge — link hovers and selections.
-        config.userContentController.addUserScript(PageBridge.userScript)
+        config.userContentController.addUserScript(PageBridge.userScript(
+            hoverDelayMs: Int(settings.linkHoverDelay * 1000), hoverEnabled: settings.linkHoverEnabled))
         config.userContentController.add(coordinator, name: PageBridge.handlerName)
+
+        hoverObserver = NotificationCenter.default.addObserver(
+            forName: .hoverSettingsChanged, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.applyHoverSettings() }
+        }
+    }
+
+    private var hoverObserver: (any NSObjectProtocol)?
+
+    /// Push changed hover settings to future pages (rebuilt user script) and to
+    /// every live page (window globals the script reads at event time).
+    private func applyHoverSettings() {
+        configuration.userContentController.removeAllUserScripts()
+        configuration.userContentController.addUserScript(PageBridge.userScript(
+            hoverDelayMs: Int(settings.linkHoverDelay * 1000), hoverEnabled: settings.linkHoverEnabled))
+        let js = "window.__runeHoverMs = \(Int(settings.linkHoverDelay * 1000));"
+            + "window.__runeHoverOff = \(settings.linkHoverEnabled ? "false" : "true");"
+        for tab in sessionTabs { tab.webView.evaluateJavaScript(js) }
+        for tab in openTabs.values { tab.webView.evaluateJavaScript(js) }
     }
 
     func persist() {
