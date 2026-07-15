@@ -262,6 +262,11 @@ final class BrowserModel: ObservableObject {
     /// The one save path every capture flow funnels through: download, toast,
     /// optional Claude auto-tagging.
     func saveToFinder(assetURL: URL, from webView: WKWebView?, tags: [String] = [], quiet: Bool = false) {
+        // Saving the same asset twice shouldn't clone it.
+        if finder.items.contains(where: { $0.assetURL == assetURL.absoluteString }) {
+            if !quiet { NotificationCenter.default.post(name: .finderToast, object: "Already in Finder") }
+            return
+        }
         let source = webView?.url?.absoluteString ?? ""
         let title = webView?.title ?? ""
         Task { @MainActor in
@@ -299,8 +304,9 @@ final class BrowserModel: ObservableObject {
         }
     }
 
-    /// ⇧⌘S: scan the page and open the batch-collect sheet.
-    func collectFromPage() {
+    /// ⇧⌘S: scan the page and open the batch-collect sheet. Retries once —
+    /// invoked right after navigation, images may not have loaded yet.
+    func collectFromPage(retried: Bool = false) {
         guard let tab = activeTab else { return }
         tab.webView.evaluateJavaScript(PageBridge.collectMediaJS) { [weak self] result, _ in
             guard let json = result as? String, let data = json.data(using: .utf8),
@@ -310,7 +316,12 @@ final class BrowserModel: ObservableObject {
                 let min = Int(self.settings.finderMinCollectSize)
                 let kept = found.filter { $0.w == 0 || ($0.w >= min && $0.h >= min) }
                 if kept.isEmpty {
-                    NotificationCenter.default.post(name: .finderToast, object: "Nothing collectable on this page")
+                    if retried {
+                        NotificationCenter.default.post(name: .finderToast, object: "Nothing collectable on this page")
+                    } else {
+                        try? await Task.sleep(for: .seconds(1.5))
+                        self.collectFromPage(retried: true)
+                    }
                 } else {
                     self.collectCandidates = kept
                 }

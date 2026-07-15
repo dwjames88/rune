@@ -49,6 +49,8 @@ struct FinderView: View {
     @State private var query = ""
     @State private var filter = Filter.all
     @State private var selectedID: UUID?
+    @State private var toast: String?
+    @State private var toastDismiss: Task<Void, Never>?
 
     enum Filter: Equatable {
         case all, images, videos, starred
@@ -89,6 +91,28 @@ struct FinderView: View {
             }
         }
         .background(appearance.windowBG)
+        .overlay(alignment: .top) {
+            if let toast {
+                Text(toast)
+                    .font(appearance.font(12, weight: .medium))
+                    .foregroundStyle(appearance.chromeText)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(.regularMaterial, in: Capsule())
+                    .overlay(Capsule().strokeBorder(appearance.hairline))
+                    .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
+                    .padding(.top, 10)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeOut(duration: 0.18), value: toast)
+        .onReceive(NotificationCenter.default.publisher(for: .finderToast)) { note in
+            toast = note.object as? String
+            toastDismiss?.cancel()
+            toastDismiss = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2.5))
+                if !Task.isCancelled { toast = nil }
+            }
+        }
     }
 
     private func openSource(_ item: FinderItem) {
@@ -390,6 +414,11 @@ private struct FinderInspector: View {
     @State private var note = ""
     @State private var newCustomKey = ""
     @State private var newCustomValue = ""
+    // Edits save themselves: debounced while typing, flushed when switching
+    // items or closing. `editingID` pins drafts to the item they belong to so
+    // switching selection mid-edit never writes onto the wrong item.
+    @State private var editingID: UUID?
+    @State private var commitTask: Task<Void, Never>?
 
     var body: some View {
         ScrollView {
@@ -506,18 +535,37 @@ private struct FinderInspector: View {
         }
         .background(appearance.windowBG)
         .onAppear(perform: load)
-        .onChange(of: item.id) { load() }
+        .onChange(of: item.id) { commit(); load() }
+        .onChange(of: name) { scheduleCommit() }
+        .onChange(of: tagsText) { scheduleCommit() }
+        .onChange(of: note) { scheduleCommit() }
+        .onDisappear { commit() }
     }
 
     private func load() {
+        commitTask?.cancel()
+        editingID = item.id
         name = item.fileName
         tagsText = item.tags.joined(separator: ", ")
         note = item.note
     }
 
+    private func scheduleCommit() {
+        guard editingID == item.id else { return }   // load() itself changed the fields
+        commitTask?.cancel()
+        commitTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.8))
+            if !Task.isCancelled { commit() }
+        }
+    }
+
+    /// Writes drafts back to the item they were loaded from — never the one
+    /// currently displayed (they differ when the user just switched).
     private func commit() {
-        var updated = item
-        updated.fileName = name.trimmingCharacters(in: .whitespaces).isEmpty ? item.fileName : name
+        commitTask?.cancel()
+        guard let id = editingID, var updated = finder.items.first(where: { $0.id == id }) else { return }
+        let trimmedName = name.trimmingCharacters(in: .whitespaces)
+        updated.fileName = trimmedName.isEmpty ? updated.fileName : trimmedName
         updated.tags = tagsText.split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
             .filter { !$0.isEmpty }

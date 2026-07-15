@@ -72,7 +72,8 @@ signed in. **Anthropic API key is in the macOS Keychain** (`com.dwjames.Rune` /
 | `Claude.swift` | `ClaudeService` (raw HTTP Messages API) + `Keychain` |
 | `ClaudeUI.swift` | Link hover popover, selection actions, Ask bar (⌘J), summary cache |
 | `PageBridge.swift` | Injected JS (link hover + selection), page-text extraction, HTML→text fetcher |
-| `Theme.swift` | Legacy static tokens — **only** `CommandPalette` still uses these. Migrate it to `AppearanceStore` when convenient. |
+| `FinderView.swift` | Finder window: rail/grid/inspector, collect sheet, `FinderWindowController` |
+| `Finder.swift` | `FinderStore`, item model, save pipeline, `RuneWebView` capture |
 
 ## 5. Feature state
 
@@ -123,6 +124,10 @@ requires a **paid** Apple Developer Program membership; confirm enrollment befor
   anything that calls the API.
 - **Screenshots:** `screencapture -o -x /tmp/x.png` from Bash works and bypasses compositor
   filtering; `sips -c H W --cropOffset Y X` to crop.
+- **⌘K never reaches Rune on the owner's machine** — some other utility owns it as a
+  global hotkey (verified with an event monitor: ⌘J arrives, ⌘K doesn't). Not a Rune
+  bug. The palette works via View ▸ Command Palette, or remap it in Settings ▸ Shortcuts.
+  Theme.swift is deleted — the palette is appearance-driven now.
 - **`open` (and dev-run.sh) reuses a running Rune instance** — you'll be looking at the old
   build. Quit first: `osascript -e 'quit app id "com.dwjames.Rune"'` (window positioning via
   System Events also works; only keystrokes are blocked).

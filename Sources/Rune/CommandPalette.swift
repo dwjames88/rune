@@ -6,6 +6,7 @@ struct CommandPalette: View {
     @ObservedObject var model: BrowserModel
     let dispatch: (Command) -> Void
     @Binding var isPresented: Bool
+    @EnvironmentObject var appearance: AppearanceStore
 
     @State private var query = ""
     @State private var selection = 0
@@ -78,7 +79,7 @@ struct CommandPalette: View {
             }
             .frame(width: 560)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.hairline))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(appearance.hairline))
             .shadow(color: .black.opacity(0.25), radius: 30, y: 10)
             .padding(.top, 90)
         }
@@ -119,6 +120,7 @@ private struct PaletteRow: View {
     let item: CommandPalette.Item
     @ObservedObject var model: BrowserModel
     let selected: Bool
+    @EnvironmentObject var appearance: AppearanceStore
 
     var body: some View {
         HStack(spacing: 10) {
@@ -131,7 +133,7 @@ private struct PaletteRow: View {
             if let trailing { Text(trailing).font(.callout).foregroundStyle(selected ? .white.opacity(0.9) : .secondary) }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(selected ? Theme.accent : .clear))
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(selected ? appearance.accent : .clear))
     }
 
     private var icon: String {

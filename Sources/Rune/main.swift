@@ -72,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // menu (declared in Info.plist; handled below).
         NSApp.servicesProvider = self
         NSUpdateDynamicServices()
+
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -189,7 +190,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let mainMenu = NSMenu()
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "About Rune", action: nil, keyEquivalent: "")
+        appMenu.addItem(withTitle: "About Rune",
+                        action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
+                        keyEquivalent: "")
         appMenu.addItem(.separator())
         addCommandItem(.openSettings, to: appMenu)
         appMenu.addItem(.separator())
@@ -239,6 +242,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func dispatch(_ command: Command) {
+        // Commands that act on the browser should be seen acting: invoked from
+        // the Finder window, ⌘K/⌘T/⌘L would otherwise work invisibly behind it.
+        let worksAnywhere: Set<Command> = [.openFinder, .openSettings, .closeTab]
+        if finderWindow.isKey, !worksAnywhere.contains(command) {
+            window?.makeKeyAndOrderFront(nil)
+        }
         switch command {
         case .commandPalette: NotificationCenter.default.post(name: .showCommandPalette, object: nil)
         case .askPage: NotificationCenter.default.post(name: .showAskBar, object: nil)

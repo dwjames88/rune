@@ -114,7 +114,7 @@ enum Command: String, CaseIterable, Identifiable {
         case file = "File"
         case view = "View"
         case history = "History"
-        case navigate = "Navigate"
+        case navigate = "Go"
         case finder = "Finder"
     }
 }

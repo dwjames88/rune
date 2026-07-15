@@ -129,6 +129,11 @@ final class FinderStore: ObservableObject {
     @discardableResult
     func save(assetURL: URL, sourceURL: String, sourceTitle: String,
               tags: [String] = [], folderIDs: [UUID] = []) async throws -> FinderItem {
+        // Same asset saved twice returns the existing item — every capture
+        // path (context menu, ⌥S, batch, Services) gets dupe protection.
+        if let existing = items.first(where: { $0.assetURL == assetURL.absoluteString }) {
+            return existing
+        }
         var request = URLRequest(url: assetURL)
         request.timeoutInterval = 30
         request.setValue("Mozilla/5.0 (Macintosh) Rune/0.1", forHTTPHeaderField: "User-Agent")

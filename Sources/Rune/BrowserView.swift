@@ -54,7 +54,11 @@ private struct Sidebar: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     FavoritesSection(model: model)
-                    PinnedSection(model: model)
+                    // No header for an empty shelf — the section appears once
+                    // something is pinned (⌘D or the tab's context menu).
+                    if !model.pinned.isEmpty || !model.folders.isEmpty {
+                        PinnedSection(model: model)
+                    }
                     SessionSection(model: model)
                 }
                 .padding(.horizontal, 8).padding(.top, 4)
