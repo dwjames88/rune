@@ -1,8 +1,46 @@
 import AppKit
 import SwiftUI
 
-/// The Finder library surface: rail (kinds / folders / tags) · thumbnail grid
-/// · inspector. Fully native, appearance-driven, shown over the content area.
+/// The Finder library window: rail (kinds / folders / tags) · thumbnail grid
+/// · inspector. Fully native and appearance-driven.
+@MainActor
+final class FinderWindowController {
+    private var window: NSWindow?
+    private let model: BrowserModel
+    private let appearance: AppearanceStore
+
+    init(model: BrowserModel, appearance: AppearanceStore) {
+        self.model = model
+        self.appearance = appearance
+    }
+
+    func show() {
+        if window == nil {
+            let w = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 960, height: 620),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                backing: .buffered, defer: false)
+            w.title = "Finder"
+            w.minSize = NSSize(width: 720, height: 440)
+            w.center(); w.setFrameAutosaveName("RuneFinder"); w.isReleasedWhenClosed = false
+            let hosting = NSHostingController(rootView: FinderView(model: model, finder: model.finder)
+                .environmentObject(appearance))
+            hosting.sizingOptions = []
+            w.contentViewController = hosting
+            window = w
+        }
+        window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// ⌥⌘F toggles; ⌘W in this window closes it instead of a browser tab.
+    func toggle() {
+        if let w = window, w.isVisible, w.isKeyWindow { w.close() } else { show() }
+    }
+    var isKey: Bool { window?.isKeyWindow ?? false }
+    func close() { window?.close() }
+}
+
 struct FinderView: View {
     @ObservedObject var model: BrowserModel
     @ObservedObject var finder: FinderStore
@@ -56,6 +94,7 @@ struct FinderView: View {
     private func openSource(_ item: FinderItem) {
         guard let url = URL(string: item.sourceURL) else { return }
         model.newTab(url: url)
+        NotificationCenter.default.post(name: .frontBrowserWindow, object: nil)
     }
 
     // MARK: Rail
@@ -158,11 +197,6 @@ struct FinderView: View {
                 .overlay(RoundedRectangle(cornerRadius: appearance.cornerRadius).strokeBorder(appearance.hairline))
                 Text("\(filtered.count) item\(filtered.count == 1 ? "" : "s")")
                     .font(appearance.font(11)).foregroundStyle(appearance.secondaryText(on: appearance.chrome))
-                Button { model.showingFinder = false } label: {
-                    Image(systemName: "xmark").font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(appearance.secondaryText(on: appearance.chrome))
-                }
-                .buttonStyle(.plain).help("Close Finder (⌥⌘F)")
             }
             .padding(10)
             .background(appearance.chrome)

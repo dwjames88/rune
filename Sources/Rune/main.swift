@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                   claude: claude, finder: finder)
     lazy var settingsWindow = SettingsWindowController(
         settings: settings, shortcuts: shortcuts, history: history, appearance: appearance, claude: claude)
+    lazy var finderWindow = FinderWindowController(model: model, appearance: appearance)
     private var window: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -65,6 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let center = NotificationCenter.default
         center.addObserver(self, selector: #selector(buildMenu), name: .shortcutsChanged, object: nil)
         center.addObserver(self, selector: #selector(applyWindowChrome), name: .appearanceChanged, object: nil)
+        center.addObserver(self, selector: #selector(frontBrowserWindow), name: .frontBrowserWindow, object: nil)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -88,6 +90,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     private var appliedIconTokens: (String, String)?
+
+    @objc private func frontBrowserWindow() {
+        window?.makeKeyAndOrderFront(nil)
+    }
 
     @objc private func applyWindowChrome() {
         let hidden = appearance.appearance.hideTrafficLights
@@ -164,14 +170,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .commandPalette: NotificationCenter.default.post(name: .showCommandPalette, object: nil)
         case .askPage: NotificationCenter.default.post(name: .showAskBar, object: nil)
         case .newTab: model.newTab()
-        case .closeTab: model.closeActive()
+        case .closeTab:
+            // ⌘W closes the window you're looking at, not a hidden tab.
+            if finderWindow.isKey { finderWindow.close() } else { model.closeActive() }
         case .reload: model.reload()
         case .goBack: model.goBack()
         case .goForward: model.goForward()
         case .focusAddress: NotificationCenter.default.post(name: .focusAddressBar, object: nil)
         case .toggleSidebar: model.sidebarVisible.toggle()
         case .togglePiP: model.activeTab?.togglePiP()
-        case .openFinder: model.showingFinder.toggle()
+        case .openFinder: finderWindow.toggle()
         case .saveMediaUnderCursor: model.saveMediaUnderCursor()
         case .collectFromPage: model.collectFromPage()
         case .capturePage: model.capturePage()

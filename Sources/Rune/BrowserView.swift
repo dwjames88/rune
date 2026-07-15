@@ -35,7 +35,8 @@ struct BrowserView: View {
     }
 
     private var sidebar: some View {
-        Sidebar(model: model).frame(width: appearance.sidebarWidth).transition(.move(edge: .leading))
+        Sidebar(model: model, dispatch: dispatch)
+            .frame(width: appearance.sidebarWidth).transition(.move(edge: .leading))
     }
 }
 
@@ -43,6 +44,7 @@ struct BrowserView: View {
 
 private struct Sidebar: View {
     @ObservedObject var model: BrowserModel
+    let dispatch: (Command) -> Void
     @EnvironmentObject var appearance: AppearanceStore
 
     var body: some View {
@@ -66,15 +68,13 @@ private struct Sidebar: View {
                         .padding(.horizontal, 8).padding(.vertical, 7)
                 }
                 .buttonStyle(.plain)
-                Button { model.showingFinder.toggle() } label: {
+                Button { dispatch(.openFinder) } label: {
                     Image(systemName: "sparkles.rectangle.stack")
                         .font(.system(size: 13))
                         .padding(.horizontal, 8).padding(.vertical, 7)
                 }
                 .buttonStyle(.plain)
                 .help("Finder — saved inspiration (⌥⌘F)")
-                .background(RoundedRectangle(cornerRadius: appearance.cornerRadius)
-                    .fill(model.showingFinder ? appearance.selection : .clear))
             }
             .foregroundStyle(appearance.sidebarSecondary).padding(8)
         }
@@ -536,9 +536,7 @@ private struct ContentArea: View {
             Divider()
             ZStack(alignment: .top) {
                 appearance.windowBG
-                if model.showingFinder {
-                    FinderView(model: model, finder: model.finder)
-                } else if let tab = model.activeTab {
+                if let tab = model.activeTab {
                     TabContent(tab: tab, model: model)
                 } else {
                     StartPage(model: model)

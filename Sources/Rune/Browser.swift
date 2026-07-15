@@ -178,8 +178,6 @@ final class BrowserModel: ObservableObject {
     @Published var openTabs: [UUID: Tab] = [:]     // savedID -> live tab
     @Published var selection: Selection?
     @Published var sidebarVisible = true
-    /// The Finder library surface (shown over the content area).
-    @Published var showingFinder = false
     /// Batch-collect candidates; non-nil presents the collect sheet.
     @Published var collectCandidates: [CollectCandidate]?
 
@@ -387,7 +385,6 @@ final class BrowserModel: ObservableObject {
     // MARK: Selection
 
     func select(_ new: Selection) {
-        showingFinder = false
         guard new != selection else { return }
         if settings.autoPiP != .off, let current = activeTab { current.requestPiPIfPlaying() }
         if case .saved(let id) = new, openTabs[id] == nil, let saved = savedTab(id) {
@@ -614,7 +611,6 @@ final class BrowserModel: ObservableObject {
 
     func navigate(_ input: String) {
         guard let url = resolve(input) else { return }
-        showingFinder = false   // typing an address means "browse", not "browse the library"
         let tab = activeTab ?? newTab()
         tab.load(url)
     }

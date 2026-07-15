@@ -323,4 +323,5 @@ extension Notification.Name {
     static let focusStartPage = Notification.Name("rune.focusStartPage")
     static let hoverSettingsChanged = Notification.Name("rune.hoverSettingsChanged")
     static let finderToast = Notification.Name("rune.finderToast")
+    static let frontBrowserWindow = Notification.Name("rune.frontBrowserWindow")
 }

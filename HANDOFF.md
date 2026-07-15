@@ -184,8 +184,10 @@ to `Command` instead so it gets a menu item + remappable shortcut automatically.
 
 ### D2. Finder UI + capture flows — ✅ DONE (2026-07-15, verified on-device)
 
-`FinderView.swift`: library surface over the content area (⌥⌘F command, sidebar
-button, **Finder menu** in the menu bar) — rail (All/Images/Videos/Starred +
+`FinderView.swift`: the library is a **separate window** (`FinderWindowController`,
+frame-autosaved, ⌥⌘F toggles, sidebar button + **Finder menu**; ⌘W closes the
+window when it's key — see `dispatch(.closeTab)`; double-click fronts the browser
+window via `.frontBrowserWindow`) — rail (All/Images/Videos/Starred +
 folders CRUD + tag list), adaptive thumbnail grid (double-click opens source,
 context menu: reveal/star/trash), inspector (rename, 0–5 stars, tags, note,
 folder membership, custom key/value fields, dominant-color swatches, source
