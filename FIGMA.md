@@ -10,7 +10,10 @@
 > 23:31, Ask Bar 23:48, Link Popover 23:52, Selection Actions 23:57, Traffic
 > Lights 23:64, Sidebar 24:37, Start Page 24:99).
 > **Flows** page = Browser Window screen (25:2, instances only) + Overlays
-> gallery (25:180). Single-mode "Rune" variable collection (owner's call: no
+> gallery (25:180) + **Finder Window screen (37:214)**. Finder design
+> components (2026-07-15): Molecules — Finder Rail Row 35:102 (Label/Count
+> props), Tag Chip 35:103, Finder Card set 35:135 (Kind × Selected).
+> Organisms — Finder Rail 36:98, Finder Inspector 36:136. Single-mode "Rune" variable collection (owner's call: no
 > modes); everything bound to it. Text is Inter standing in for SF Pro (SF Pro
 > renders zero-width via the plugin API). Starter-plan caps to remember: 1
 > mode/collection, 3 pages, MCP call quota (burned one account's quota mid-run).
