@@ -72,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // menu (declared in Info.plist; handled below).
         NSApp.servicesProvider = self
         NSUpdateDynamicServices()
+        FinderQuickAction.installIfNeeded()
 
     }
 
