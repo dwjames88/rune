@@ -186,12 +186,15 @@ final class BrowserModel: ObservableObject {
     let history: HistoryStore
     let shortcuts: ShortcutStore
     let claude: ClaudeService
+    let finder: FinderStore
     private lazy var coordinator = WebCoordinator(model: self)
 
     private struct Persisted: Codable { var favorites: [SavedTab]; var pinned: [SavedTab]; var folders: [Folder] }
 
-    init(settings: SettingsStore, history: HistoryStore, shortcuts: ShortcutStore, claude: ClaudeService) {
-        self.settings = settings; self.history = history; self.shortcuts = shortcuts; self.claude = claude
+    init(settings: SettingsStore, history: HistoryStore, shortcuts: ShortcutStore,
+         claude: ClaudeService, finder: FinderStore) {
+        self.settings = settings; self.history = history; self.shortcuts = shortcuts
+        self.claude = claude; self.finder = finder
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
         config.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -243,9 +246,23 @@ final class BrowserModel: ObservableObject {
     }
 
     private func makeWebView(configuration: WKWebViewConfiguration? = nil) -> WKWebView {
-        let webView = WKWebView(frame: .zero, configuration: configuration ?? self.configuration)
+        let webView = RuneWebView(frame: .zero, configuration: configuration ?? self.configuration)
         webView.navigationDelegate = coordinator
         webView.uiDelegate = coordinator
+        webView.onSaveToFinder = { [weak self, weak webView] url, _ in
+            guard let self else { return }
+            let source = webView?.url?.absoluteString ?? ""
+            let title = webView?.title ?? ""
+            Task { @MainActor in
+                do {
+                    _ = try await self.finder.save(assetURL: url, sourceURL: source, sourceTitle: title)
+                    NotificationCenter.default.post(name: .finderToast, object: "Saved to Finder")
+                } catch {
+                    NotificationCenter.default.post(name: .finderToast,
+                                                    object: "Couldn't save — \(error.localizedDescription)")
+                }
+            }
+        }
         return webView
     }
 

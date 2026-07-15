@@ -34,6 +34,14 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
                                                 y: body["y"] as? Double ?? 0)
             case "selectionCleared":
                 tab.selection = nil
+            case "contextTarget":
+                guard let runeView = webView as? RuneWebView else { return }
+                if let src = body["src"] as? String, let url = URL(string: src) {
+                    let kind: FinderItem.Kind = (body["kind"] as? String) == "video" ? .video : .image
+                    runeView.contextTarget = .init(url: url, kind: kind, at: Date())
+                } else {
+                    runeView.contextTarget = nil
+                }
             default: break
             }
         }

@@ -14,7 +14,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let shortcuts = ShortcutStore()
     let appearance = AppearanceStore()
     let claude = ClaudeService()
-    lazy var model = BrowserModel(settings: settings, history: history, shortcuts: shortcuts, claude: claude)
+    let finder = FinderStore()
+    lazy var model = BrowserModel(settings: settings, history: history, shortcuts: shortcuts,
+                                  claude: claude, finder: finder)
     lazy var settingsWindow = SettingsWindowController(
         settings: settings, shortcuts: shortcuts, history: history, appearance: appearance, claude: claude)
     private var window: NSWindow?

@@ -495,6 +495,8 @@ private struct ContentArea: View {
     // Memoized: recomputed once per keystroke/focus change, not on every body
     // evaluation (predict scans the whole history).
     @State private var suggestions: [Suggestion] = []
+    @State private var toast: String?
+    @State private var toastDismiss: Task<Void, Never>?
 
     private func updateSuggestions() {
         guard addressFocused, !address.trimmingCharacters(in: .whitespaces).isEmpty else {
@@ -533,8 +535,20 @@ private struct ContentArea: View {
                     }
                     .padding(.horizontal, 44).padding(.top, 4)
                 }
+                if let toast {
+                    Text(toast)
+                        .font(appearance.font(12, weight: .medium))
+                        .foregroundStyle(appearance.chromeText)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(.regularMaterial, in: Capsule())
+                        .overlay(Capsule().strokeBorder(appearance.hairline))
+                        .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
+                        .padding(.top, 10)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
             }
         }
+        .animation(.easeOut(duration: 0.18), value: toast)
         .onChange(of: model.selection) { sync() }
         // Live URL updates from the active tab: ContentArea doesn't observe the
         // Tab object, so navigations that never touch the toolbar (start-page
@@ -544,6 +558,14 @@ private struct ContentArea: View {
         .onChange(of: addressFocused) { updateSuggestions() }
         .onAppear { sync() }
         .onReceive(NotificationCenter.default.publisher(for: .focusAddressBar)) { _ in addressFocused = true }
+        .onReceive(NotificationCenter.default.publisher(for: .finderToast)) { note in
+            toast = note.object as? String
+            toastDismiss?.cancel()
+            toastDismiss = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2.5))
+                if !Task.isCancelled { toast = nil }
+            }
+        }
     }
 
     private func sync() { address = model.activeTab?.urlString ?? "" }

@@ -182,13 +182,19 @@ to `Command` instead so it gets a menu item + remappable shortcut automatically.
 
 ---
 
-### D. Finder (inspiration library) — specced, not started
+### D. Finder (inspiration library) — phase 1 ✅ DONE (2026-07-14, verified)
 
-See **`FINDER.md`**: Eagle-style library (per-item folder + item.json, tags,
-multi-membership virtual folders, smart folders, stars, dominant colors, custom
-fields), capture via context menu / hover shortcut / batch collect / page
-snapshot, native SwiftUI grid surface, optional Claude auto-tagging. Build
-order is in the doc — start with `FinderStore` + save pipeline.
+See **`FINDER.md`** for the full spec (Eagle-style). Shipped and verified on-device:
+`Finder.swift` — `FinderStore` (library at `…/Rune/Finder/items/<uuid>/` with
+original + thumb.png + self-describing item.json, tolerant decoding), save
+pipeline (URLSession download with Referer, UTType kind detection, dimensions,
+dominant-color extraction, 512px thumbnail), `RuneWebView.willOpenMenu` adds
+**"Save Image/Video to Rune Finder"** (PageBridge posts the media element on
+`contextmenu`), toast feedback in ContentArea.
+
+**Next phases** (FINDER.md §3): Finder UI surface (grid + folders/tags rail +
+inspector) → batch collect + page capture → smart folders/custom fields UI →
+Claude auto-tagging. `FinderFolder` + `allTags` already exist in the store.
 
 ### E. Figma component library — blocked on Figma MCP auth
 

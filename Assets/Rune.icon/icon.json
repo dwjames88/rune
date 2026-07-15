@@ -20,6 +20,7 @@
       "layers" : [
         {
           "fill" : "none",
+          "hidden" : false,
           "image-name" : "Rune.svg",
           "name" : "Rune",
           "position" : {

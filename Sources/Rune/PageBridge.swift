@@ -77,6 +77,22 @@ enum PageBridge {
       // Only bother the native side while something is actually showing —
       // scrolling must never pay for the bridge.
       document.addEventListener('scroll', clearHover, true);
+
+      // Right-click on media → tell native what's under the cursor so the
+      // context menu can offer "Save to Rune Finder". Fires once per
+      // right-click, before the menu opens.
+      document.addEventListener('contextmenu', (e) => {
+        const media = e.target.closest && (e.target.closest('img,video,picture'));
+        let src = null, kind = null;
+        if (media) {
+          const el = media.tagName === 'PICTURE' ? media.querySelector('img') : media;
+          if (el) {
+            src = el.currentSrc || el.src || null;
+            kind = el.tagName === 'VIDEO' ? 'video' : 'image';
+          }
+        }
+        post({ type: 'contextTarget', src: src, kind: kind });
+      }, true);
     })();
     """ }
 
