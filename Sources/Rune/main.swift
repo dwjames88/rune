@@ -87,7 +87,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// selected text from any app.
     @objc func saveToRuneFinder(_ pboard: NSPasteboard, userData: String,
                                 error: AutoreleasingUnsafeMutablePointer<NSString>) {
-        NSLog("Rune service: invoked with types %@", pboard.types?.map(\.rawValue).joined(separator: ", ") ?? "none")
+        ingest(pasteboard: pboard)
+    }
+
+    /// Same handler, second registration: Finder's context menu matches file
+    /// services on a pure NSSendFileTypes declaration, while text/image/URL
+    /// selections match NSSendTypes — so the service is declared twice under
+    /// one menu title (only one fits any given context).
+    @objc func saveToRuneFinderData(_ pboard: NSPasteboard, userData: String,
+                                    error: AutoreleasingUnsafeMutablePointer<NSString>) {
         ingest(pasteboard: pboard)
     }
 

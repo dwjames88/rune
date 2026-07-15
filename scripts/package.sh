@@ -62,9 +62,21 @@ cat > "$APP/Contents/Info.plist" <<PLIST
         <key>NSMenuItem</key><dict><key>default</key><string>Save to Rune Finder</string></dict>
         <key>NSMessage</key><string>saveToRuneFinder</string>
         <key>NSPortName</key><string>Rune</string>
+        <key>NSRequiredContext</key>
+        <dict>
+          <key>NSServiceCategory</key><string>public.item</string>
+        </dict>
         <key>NSSendTypes</key>
         <array>
           <string>public.file-url</string>
+        </array>
+      </dict>
+      <dict>
+        <key>NSMenuItem</key><dict><key>default</key><string>Save to Rune Finder</string></dict>
+        <key>NSMessage</key><string>saveToRuneFinderData</string>
+        <key>NSPortName</key><string>Rune</string>
+        <key>NSSendTypes</key>
+        <array>
           <string>public.url</string>
           <string>public.png</string>
           <string>public.tiff</string>

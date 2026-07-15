@@ -209,8 +209,17 @@ images, URLs, and selected text from any app's right-click ▸ Services menu ·
 "Open With Rune"/dock drops import files (CFBundleDocumentTypes + 
 `application(_:open:)`; web URLs open as tabs) · drag anything onto the Finder
 window grid. Test recipe: NSPerformService("Save to Rune Finder", pboard) from
-`swift -e`. If the Services item doesn't show: System Settings ▸ Keyboard ▸
-Keyboard Shortcuts ▸ Services. Remaining ideas: smart folders, drag-out
+`swift -e`. **Critical gotcha (cost hours): Finder's file context menu only
+renders services that declare `NSRequiredContext` → `NSServiceCategory`
+(e.g. public.item).** Plain NSSendTypes/NSSendFileTypes services register and
+execute (NSPerformService succeeds) but never appear in the menu — discovered
+by diffing against Supercharge's working declarations in `pbs -dump_pboard`.
+The service is declared twice under one title: files (NSServiceCategory +
+public.file-url) and data (text/png/url NSSendTypes) → saveToRuneFinder /
+saveToRuneFinderData. After plist changes: rebuild, `lsregister -f`, `pbs
+-flush && pbs -update`, `killall Finder`. A canonical copy is installed at
+/Applications/Rune.app (registration resolves there; service messages route to
+whichever Rune is running, so dev builds keep working). Remaining ideas: smart folders, drag-out
 capture, video thumbnails, full-page (paginated) capture.
 
 ### D. Finder (inspiration library) — phase 1 ✅ DONE (2026-07-14, verified)
