@@ -202,20 +202,40 @@ struct FinderView: View {
             .background(appearance.chrome)
             Divider().overlay(appearance.hairline)
 
-            if filtered.isEmpty {
-                emptyState
-            } else {
-                ScrollView {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 14)], spacing: 14) {
-                        ForEach(filtered) { item in
-                            FinderCard(finder: finder, item: item,
-                                       selected: selectedID == item.id,
-                                       select: { selectedID = item.id },
-                                       open: { openSource(item) })
+            Group {
+                if filtered.isEmpty {
+                    emptyState
+                } else {
+                    ScrollView {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 14)], spacing: 14) {
+                            ForEach(filtered) { item in
+                                FinderCard(finder: finder, item: item,
+                                           selected: selectedID == item.id,
+                                           select: { selectedID = item.id },
+                                           open: { openSource(item) })
+                            }
                         }
+                        .padding(14)
                     }
-                    .padding(14)
                 }
+            }
+            // Drag anything in: files from macOS Finder, images/links from
+            // other apps or web pages.
+            .dropDestination(for: URL.self) { urls, _ in
+                Task { @MainActor in
+                    var saved = 0
+                    for url in urls {
+                        if url.isFileURL {
+                            if (try? await finder.importFile(url)) != nil { saved += 1 }
+                        } else if (try? await finder.save(assetURL: url, sourceURL: url.absoluteString,
+                                                          sourceTitle: "")) != nil { saved += 1 }
+                    }
+                    if saved > 0 {
+                        NotificationCenter.default.post(name: .finderToast,
+                                                        object: "Saved \(saved) item\(saved == 1 ? "" : "s") to Finder")
+                    }
+                }
+                return true
             }
         }
     }

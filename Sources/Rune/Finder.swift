@@ -166,6 +166,25 @@ final class FinderStore: ObservableObject {
         return item
     }
 
+    /// Import a local file (macOS Service, dock drop, window drop). The
+    /// original is copied in; the source stays untouched.
+    @discardableResult
+    func importFile(_ url: URL) async throws -> FinderItem {
+        let data = try Data(contentsOf: url)
+        let ext = url.pathExtension.isEmpty ? "bin" : url.pathExtension.lowercased()
+        return try await save(data: data, ext: ext,
+                              fileName: url.deletingPathExtension().lastPathComponent,
+                              sourceURL: url.absoluteString, sourceTitle: "")
+    }
+
+    /// Save a text snippet (Service: selected text anywhere in macOS).
+    @discardableResult
+    func saveText(_ text: String) async throws -> FinderItem {
+        let name = text.split(separator: "\n").first.map { String($0.prefix(60)) } ?? "Snippet"
+        return try await save(data: Data(text.utf8), ext: "txt",
+                              fileName: name, sourceURL: "", sourceTitle: "")
+    }
+
     /// Save raw data directly (page snapshots, dropped files). Same pipeline,
     /// no download step.
     @discardableResult

@@ -56,6 +56,37 @@ cat > "$APP/Contents/Info.plist" <<PLIST
         <key>UTTypeTagSpecification</key><dict/>
       </dict>
     </array>
+    <key>NSServices</key>
+    <array>
+      <dict>
+        <key>NSMenuItem</key><dict><key>default</key><string>Save to Rune Finder</string></dict>
+        <key>NSMessage</key><string>saveToRuneFinder</string>
+        <key>NSPortName</key><string>Rune</string>
+        <key>NSSendTypes</key>
+        <array>
+          <string>public.file-url</string>
+          <string>public.url</string>
+          <string>public.png</string>
+          <string>public.tiff</string>
+          <string>NSStringPboardType</string>
+        </array>
+      </dict>
+    </array>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+      <dict>
+        <key>CFBundleTypeName</key><string>Media</string>
+        <key>CFBundleTypeRole</key><string>Viewer</string>
+        <key>LSHandlerRank</key><string>Alternate</string>
+        <key>LSItemContentTypes</key>
+        <array>
+          <string>public.image</string>
+          <string>public.movie</string>
+          <string>public.audio</string>
+          <string>com.adobe.pdf</string>
+        </array>
+      </dict>
+    </array>
 </dict>
 </plist>
 PLIST

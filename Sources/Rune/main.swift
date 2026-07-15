@@ -67,12 +67,85 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         center.addObserver(self, selector: #selector(buildMenu), name: .shortcutsChanged, object: nil)
         center.addObserver(self, selector: #selector(applyWindowChrome), name: .appearanceChanged, object: nil)
         center.addObserver(self, selector: #selector(frontBrowserWindow), name: .frontBrowserWindow, object: nil)
+
+        // System-wide capture: "Save to Rune Finder" in every app's Services
+        // menu (declared in Info.plist; handled below).
+        NSApp.servicesProvider = self
+        NSUpdateDynamicServices()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         model.persist()
         history.flush()
         appearance.flush()
+    }
+
+    // MARK: System-wide capture
+
+    /// Services menu: "Save to Rune Finder" — takes files, URLs, images, or
+    /// selected text from any app.
+    @objc func saveToRuneFinder(_ pboard: NSPasteboard, userData: String,
+                                error: AutoreleasingUnsafeMutablePointer<NSString>) {
+        NSLog("Rune service: invoked with types %@", pboard.types?.map(\.rawValue).joined(separator: ", ") ?? "none")
+        ingest(pasteboard: pboard)
+    }
+
+    /// Dock drops and "Open With Rune": web URLs open as tabs, files land in
+    /// the Finder library.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            if url.isFileURL {
+                Task { @MainActor in
+                    if (try? await finder.importFile(url)) != nil { savedFeedback() }
+                }
+            } else {
+                model.newTab(url: url)
+                window?.makeKeyAndOrderFront(nil)
+            }
+        }
+    }
+
+    private func ingest(pasteboard pboard: NSPasteboard) {
+        // Snapshot pasteboard content NOW — service pasteboards don't outlive the call.
+        var fileURLs = (pboard.readObjects(forClasses: [NSURL.self],
+                                           options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+        if fileURLs.isEmpty, let paths = pboard.propertyList(forType: NSPasteboard.PasteboardType("NSFilenamesPboardType")) as? [String] {
+            fileURLs = paths.map { URL(fileURLWithPath: $0) }
+        }
+        let imageData = pboard.data(forType: .png) ?? pboard.data(forType: .tiff)
+        let text = pboard.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        Task { @MainActor in
+            var saved = 0
+            // 1. Files (Finder selections, image drags from apps)
+            if !fileURLs.isEmpty {
+                for url in fileURLs {
+                    do { _ = try await finder.importFile(url); saved += 1 }
+                    catch { NSLog("Rune service: import failed for %@ — %@", url.path, "\(error)") }
+                }
+            }
+            // 2. Raw image data (copied images)
+            else if let data = imageData {
+                let png = NSImage(data: data)?.png ?? data
+                if (try? await finder.save(data: png, ext: "png", fileName: "Image",
+                                           sourceURL: "", sourceTitle: "")) != nil { saved += 1 }
+            }
+            // 3. Text: URLs download, anything else is kept as a snippet
+            else if let text, !text.isEmpty {
+                if let url = URL(string: text), let scheme = url.scheme, scheme.hasPrefix("http") {
+                    if (try? await finder.save(assetURL: url, sourceURL: text, sourceTitle: "")) != nil { saved += 1 }
+                } else if (try? await finder.saveText(text)) != nil { saved += 1 }
+            }
+            if saved > 0 { savedFeedback(count: saved) }
+        }
+    }
+
+    /// Feedback that works even when Rune is in the background: in-app toast
+    /// plus a gentle dock bounce.
+    private func savedFeedback(count: Int = 1) {
+        NotificationCenter.default.post(name: .finderToast,
+                                        object: count == 1 ? "Saved to Finder" : "Saved \(count) items to Finder")
+        if !NSApp.isActive { NSApp.requestUserAttention(.informationalRequest) }
     }
 
     // Auto-PiP on leaving the app (the "window blur" case). App-level rather

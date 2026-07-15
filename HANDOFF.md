@@ -196,8 +196,17 @@ collect (JS page scan → native sheet with live previews, min-size setting,
 shared tags), Capture Page (WKWebView.takeSnapshot). Optional **Claude
 auto-tag** (Settings ▸ Browsing ▸ Finder, off by default; text-context, effort
 low). Verified: grid/inspector edits persist to item.json, batch-collected 5
-tagged items from Pinkbike, tag filter works. Remaining ideas: smart folders,
-drag-out capture, video thumbnails, full-page (paginated) capture.
+tagged items from Pinkbike, tag filter works. **System-wide capture
+(2026-07-15, verified)**: macOS Service "Save to Rune Finder" (NSServices in the
+Info.plist heredocs of BOTH dev-run.sh and package.sh; `NSApp.servicesProvider`
++ `saveToRuneFinder(_:userData:error:)` in main.swift) takes files, copied
+images, URLs, and selected text from any app's right-click ▸ Services menu ·
+"Open With Rune"/dock drops import files (CFBundleDocumentTypes + 
+`application(_:open:)`; web URLs open as tabs) · drag anything onto the Finder
+window grid. Test recipe: NSPerformService("Save to Rune Finder", pboard) from
+`swift -e`. If the Services item doesn't show: System Settings ▸ Keyboard ▸
+Keyboard Shortcuts ▸ Services. Remaining ideas: smart folders, drag-out
+capture, video thumbnails, full-page (paginated) capture.
 
 ### D. Finder (inspiration library) — phase 1 ✅ DONE (2026-07-14, verified)
 
