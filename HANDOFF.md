@@ -182,6 +182,22 @@ to `Command` instead so it gets a menu item + remappable shortcut automatically.
 
 ---
 
+### D. Finder (inspiration library) — specced, not started
+
+See **`FINDER.md`**: Eagle-style library (per-item folder + item.json, tags,
+multi-membership virtual folders, smart folders, stars, dominant colors, custom
+fields), capture via context menu / hover shortcut / batch collect / page
+snapshot, native SwiftUI grid surface, optional Claude auto-tagging. Build
+order is in the doc — start with `FinderStore` + save pipeline.
+
+### E. Figma component library — blocked on Figma MCP auth
+
+Owner wants the UI mirrored into
+<https://www.figma.com/design/Kmi2f7MKB8zKv209g9RXi4/Rune> as a component
+library (tokens → smallest components → composed screens) so they can rearrange
+in Figma. Blocked until the Figma connector is authorized (claude.ai connector
+settings). Load skills figma-use + figma-generate-library + figma-swiftui first.
+
 ## 8. Suggested first move in the new session
 
 Everything committed through the app-icon work is verified; Claude features are verified
