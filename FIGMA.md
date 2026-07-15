@@ -1,17 +1,19 @@
 # Rune → Figma component library — build map
 
-> **Run state (2026-07-14, run `rune-ds-001`)** — build is ~60% done and paused
-> on the **Figma Starter-plan MCP tool-call cap** (account dwjames88@icloud.com).
-> DONE in the file: "Rune" variable collection (12 vars, single Theme mode —
-> Starter allows 1 mode), 8 Inter text styles + 4 shadow styles, Tokens sheet,
-> **Atoms** (Favicon set 15:17, Color Dot, Selection Bar, Section Header,
-> Toolbar Button set 15:58) and **Molecules** (Tab Row set 19:43, Favorites
-> Tile 20:22, Address Bar 20:35, Suggestion Row 21:26, Start Tile, Toast, New
-> Tab Button) — all as sections on the "Assets" page (Starter = 3-page cap).
-> REMAINING: Organisms section 14:17, Screens on "Flows", QA. Full node-id
-> ledger in the session scratchpad (`dsb-state-rune-ds-001.json`) and mirrored
-> in section notes below. NOTE: SF Pro renders zero-width via the plugin API —
-> use Inter.
+> **✅ BUILT (2026-07-14, run `rune-ds-001`).** Layout in the file:
+> **Branding** page = owner's brand work + the Tokens sheet (14:18).
+> **Assets** page = the library, smallest→largest sections: 🧩 Atoms (Favicon
+> set 15:17, Color Dot 15:18, Selection Bar 15:20, Section Header 15:22,
+> Toolbar Button set 15:58) · 🧩 Molecules (Tab Row set 19:43, Favorites Tile
+> 20:22, Address Bar 20:35, Suggestion Row 21:26, Start Tile 21:27, Toast
+> 21:32, New Tab Button 21:34) · 🧩 Organisms (Toolbar 23:19, Suggestion Panel
+> 23:31, Ask Bar 23:48, Link Popover 23:52, Selection Actions 23:57, Traffic
+> Lights 23:64, Sidebar 24:37, Start Page 24:99).
+> **Flows** page = Browser Window screen (25:2, instances only) + Overlays
+> gallery (25:180). Single-mode "Rune" variable collection (owner's call: no
+> modes); everything bound to it. Text is Inter standing in for SF Pro (SF Pro
+> renders zero-width via the plugin API). Starter-plan caps to remember: 1
+> mode/collection, 3 pages, MCP call quota (burned one account's quota mid-run).
 
 Target file: <https://www.figma.com/design/Kmi2f7MKB8zKv209g9RXi4/Rune>
 Goal: mirror the UI as a **component library the owner can rearrange** —
