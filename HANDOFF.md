@@ -182,6 +182,21 @@ to `Command` instead so it gets a menu item + remappable shortcut automatically.
 
 ---
 
+### D2. Finder UI + capture flows — ✅ DONE (2026-07-15, verified on-device)
+
+`FinderView.swift`: library surface over the content area (⌥⌘F command, sidebar
+button, **Finder menu** in the menu bar) — rail (All/Images/Videos/Starred +
+folders CRUD + tag list), adaptive thumbnail grid (double-click opens source,
+context menu: reveal/star/trash), inspector (rename, 0–5 stars, tags, note,
+folder membership, custom key/value fields, dominant-color swatches, source
+link). Capture: ⌥S save-media-under-cursor (`window.__runeMedia`), ⇧⌘S batch
+collect (JS page scan → native sheet with live previews, min-size setting,
+shared tags), Capture Page (WKWebView.takeSnapshot). Optional **Claude
+auto-tag** (Settings ▸ Browsing ▸ Finder, off by default; text-context, effort
+low). Verified: grid/inspector edits persist to item.json, batch-collected 5
+tagged items from Pinkbike, tag filter works. Remaining ideas: smart folders,
+drag-out capture, video thumbnails, full-page (paginated) capture.
+
 ### D. Finder (inspiration library) — phase 1 ✅ DONE (2026-07-14, verified)
 
 See **`FINDER.md`** for the full spec (Eagle-style). Shipped and verified on-device:

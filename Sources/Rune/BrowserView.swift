@@ -59,12 +59,24 @@ private struct Sidebar: View {
             }
 
             Spacer(minLength: 0)
-            Button { model.newTab() } label: {
-                Label("New Tab", systemImage: "plus").font(appearance.font(13))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 8).padding(.vertical, 7)
+            HStack(spacing: 0) {
+                Button { model.newTab() } label: {
+                    Label("New Tab", systemImage: "plus").font(appearance.font(13))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 8).padding(.vertical, 7)
+                }
+                .buttonStyle(.plain)
+                Button { model.showingFinder.toggle() } label: {
+                    Image(systemName: "sparkles.rectangle.stack")
+                        .font(.system(size: 13))
+                        .padding(.horizontal, 8).padding(.vertical, 7)
+                }
+                .buttonStyle(.plain)
+                .help("Finder — saved inspiration (⌥⌘F)")
+                .background(RoundedRectangle(cornerRadius: appearance.cornerRadius)
+                    .fill(model.showingFinder ? appearance.selection : .clear))
             }
-            .buttonStyle(.plain).foregroundStyle(appearance.sidebarSecondary).padding(8)
+            .foregroundStyle(appearance.sidebarSecondary).padding(8)
         }
         .background(appearance.sidebarBG)
         .foregroundStyle(appearance.sidebarText)
@@ -524,10 +536,17 @@ private struct ContentArea: View {
             Divider()
             ZStack(alignment: .top) {
                 appearance.windowBG
-                if let tab = model.activeTab {
+                if model.showingFinder {
+                    FinderView(model: model, finder: model.finder)
+                } else if let tab = model.activeTab {
                     TabContent(tab: tab, model: model)
                 } else {
                     StartPage(model: model)
+                }
+                if let candidates = model.collectCandidates {
+                    CollectSheet(model: model, candidates: candidates)
+                        .padding(.top, 24)
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
                 if !suggestions.isEmpty {
                     SuggestionList(model: model, suggestions: suggestions, highlighted: highlighted) { index in

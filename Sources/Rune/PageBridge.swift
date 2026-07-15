@@ -78,23 +78,53 @@ enum PageBridge {
       // scrolling must never pay for the bridge.
       document.addEventListener('scroll', clearHover, true);
 
-      // Right-click on media → tell native what's under the cursor so the
-      // context menu can offer "Save to Rune Finder". Fires once per
-      // right-click, before the menu opens.
+      // Media under the cursor: tracked locally on mouseover (no bridge
+      // traffic); read by the context menu and the ⌥S save-under-cursor
+      // command via window.__runeMedia().
+      let lastMedia = null;
+      const mediaInfo = (t) => {
+        const media = t && t.closest && t.closest('img,video,picture');
+        if (!media) return null;
+        const el = media.tagName === 'PICTURE' ? media.querySelector('img') : media;
+        if (!el) return null;
+        const src = el.currentSrc || el.src || null;
+        if (!src) return null;
+        return { src: src, kind: el.tagName === 'VIDEO' ? 'video' : 'image' };
+      };
+      document.addEventListener('mouseover', (e) => { lastMedia = mediaInfo(e.target); }, true);
+      window.__runeMedia = () => lastMedia;
+
+      // Right-click → tell native what's under the cursor so the context menu
+      // can offer "Save to Rune Finder". Fires once per right-click.
       document.addEventListener('contextmenu', (e) => {
-        const media = e.target.closest && (e.target.closest('img,video,picture'));
-        let src = null, kind = null;
-        if (media) {
-          const el = media.tagName === 'PICTURE' ? media.querySelector('img') : media;
-          if (el) {
-            src = el.currentSrc || el.src || null;
-            kind = el.tagName === 'VIDEO' ? 'video' : 'image';
-          }
-        }
-        post({ type: 'contextTarget', src: src, kind: kind });
+        const m = mediaInfo(e.target);
+        post({ type: 'contextTarget', src: m ? m.src : null, kind: m ? m.kind : null });
       }, true);
     })();
     """ }
+
+    /// Scan the page for collectable media (batch collect). Returns
+    /// [{src, w, h, kind}], deduped, largest first.
+    static let collectMediaJS = """
+    (function () {
+      const seen = new Set();
+      const out = [];
+      for (const img of document.querySelectorAll('img')) {
+        const src = img.currentSrc || img.src;
+        if (!src || !src.startsWith('http') || seen.has(src)) continue;
+        seen.add(src);
+        out.push({ src: src, w: img.naturalWidth || img.width || 0, h: img.naturalHeight || img.height || 0, kind: 'image' });
+      }
+      for (const v of document.querySelectorAll('video')) {
+        const src = v.currentSrc || v.src;
+        if (!src || !src.startsWith('http') || seen.has(src)) continue;
+        seen.add(src);
+        out.push({ src: src, w: v.videoWidth || 0, h: v.videoHeight || 0, kind: 'video' });
+      }
+      out.sort((a, b) => (b.w * b.h) - (a.w * a.h));
+      return JSON.stringify(out.slice(0, 120));
+    })();
+    """
 
     /// Readable text of the current page, for "ask about this page".
     static let pageTextJS = """

@@ -323,6 +323,20 @@ private struct BrowsingPane: View {
                 Text("A playing video pops into a floating window when you leave its tab. \"\(Command.togglePiP.title)\" in the View menu toggles it manually.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section {
+                Toggle("Auto-tag saves with Claude", isOn: $settings.finderAutoTag)
+                HStack {
+                    Text("Batch collect: skip images smaller than")
+                    TextField("", value: $settings.finderMinCollectSize, format: .number)
+                        .frame(width: 50).multilineTextAlignment(.trailing)
+                    Text("px")
+                }
+            } header: {
+                Text("Finder")
+            } footer: {
+                Text("The Finder saves inspiration from the web — right-click any image, press ⌥S for the image under your cursor, or ⇧⌘S to collect a whole page. Open it with ⌥⌘F.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Browsing Data") {
                 LabeledContent("History") {
                     HStack { Text("\(history.entries.count) entries").foregroundStyle(.secondary)

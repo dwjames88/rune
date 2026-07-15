@@ -103,6 +103,10 @@ final class SettingsStore: ObservableObject {
     /// Claude link previews: hover a link this long before the summary appears.
     @Published var linkHoverEnabled: Bool { didSet { save(); hoverChanged() } }
     @Published var linkHoverDelay: Double { didSet { save(); hoverChanged() } }
+    /// Finder: tag saves automatically with Claude (text-context, cheap).
+    @Published var finderAutoTag: Bool { didSet { save() } }
+    /// Finder batch collect: skip images smaller than this on either side.
+    @Published var finderMinCollectSize: Double { didSet { save() } }
 
     var allEngines: [SearchEngine] { SearchEngine.presets + customEngines }
 
@@ -117,6 +121,8 @@ final class SettingsStore: ObservableObject {
         var newTabPlacement: NewTabPlacement?
         var linkHoverEnabled: Bool?
         var linkHoverDelay: Double?
+        var finderAutoTag: Bool?
+        var finderMinCollectSize: Double?
     }
 
     init() {
@@ -130,13 +136,16 @@ final class SettingsStore: ObservableObject {
         newTabPlacement = saved?.newTabPlacement ?? .end
         linkHoverEnabled = saved?.linkHoverEnabled ?? true
         linkHoverDelay = saved?.linkHoverDelay ?? 0.45
+        finderAutoTag = saved?.finderAutoTag ?? false
+        finderMinCollectSize = saved?.finderMinCollectSize ?? 200
     }
     private func save() {
         Storage.saveJSON(Payload(searchEngine: searchEngine, customEngines: customEngines,
                                  autoPiP: autoPiP, autoPiPReturnInline: autoPiPReturnInline,
                                  newTabBehavior: newTabBehavior, homePageURL: homePageURL,
                                  newTabPlacement: newTabPlacement,
-                                 linkHoverEnabled: linkHoverEnabled, linkHoverDelay: linkHoverDelay),
+                                 linkHoverEnabled: linkHoverEnabled, linkHoverDelay: linkHoverDelay,
+                                 finderAutoTag: finderAutoTag, finderMinCollectSize: finderMinCollectSize),
                          to: "settings.json")
     }
     private func hoverChanged() {

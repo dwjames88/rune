@@ -171,6 +171,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .focusAddress: NotificationCenter.default.post(name: .focusAddressBar, object: nil)
         case .toggleSidebar: model.sidebarVisible.toggle()
         case .togglePiP: model.activeTab?.togglePiP()
+        case .openFinder: model.showingFinder.toggle()
+        case .saveMediaUnderCursor: model.saveMediaUnderCursor()
+        case .collectFromPage: model.collectFromPage()
+        case .capturePage: model.capturePage()
         case .pinTab: if let t = model.activeTab { model.pin(t) }
         case .nextTab: model.selectAdjacentSession(1)
         case .previousTab: model.selectAdjacentSession(-1)

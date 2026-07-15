@@ -18,6 +18,10 @@ enum Command: String, CaseIterable, Identifiable {
     case pinTab
     case nextTab
     case previousTab
+    case openFinder
+    case saveMediaUnderCursor
+    case collectFromPage
+    case capturePage
     case openSettings
 
     var id: String { rawValue }
@@ -37,6 +41,10 @@ enum Command: String, CaseIterable, Identifiable {
         case .pinTab: "Pin / Unpin Tab"
         case .nextTab: "Next Tab"
         case .previousTab: "Previous Tab"
+        case .openFinder: "Open Finder"
+        case .saveMediaUnderCursor: "Save Image Under Cursor"
+        case .collectFromPage: "Collect Images from Page…"
+        case .capturePage: "Capture Page to Finder"
         case .openSettings: "Settings…"
         }
     }
@@ -57,6 +65,10 @@ enum Command: String, CaseIterable, Identifiable {
         case .pinTab: "pin"
         case .nextTab: "arrow.right.to.line"
         case .previousTab: "arrow.left.to.line"
+        case .openFinder: "sparkles.rectangle.stack"
+        case .saveMediaUnderCursor: "photo.badge.arrow.down"
+        case .collectFromPage: "square.grid.3x3.square"
+        case .capturePage: "camera.viewfinder"
         case .openSettings: "gearshape"
         }
     }
@@ -68,6 +80,7 @@ enum Command: String, CaseIterable, Identifiable {
         case .reload, .toggleSidebar, .togglePiP, .commandPalette, .askPage: .view
         case .goBack, .goForward: .history
         case .focusAddress, .nextTab, .previousTab: .navigate
+        case .openFinder, .saveMediaUnderCursor, .collectFromPage, .capturePage: .finder
         case .openSettings: .app
         }
     }
@@ -88,6 +101,10 @@ enum Command: String, CaseIterable, Identifiable {
         case .pinTab: ("d", .command)
         case .nextTab: ("]", [.command, .shift])
         case .previousTab: ("[", [.command, .shift])
+        case .openFinder: ("f", [.command, .option])
+        case .saveMediaUnderCursor: ("s", .option)
+        case .collectFromPage: ("s", [.command, .shift])
+        case .capturePage: ("", [])
         case .openSettings: (",", .command)
         }
     }
@@ -98,5 +115,6 @@ enum Command: String, CaseIterable, Identifiable {
         case view = "View"
         case history = "History"
         case navigate = "Navigate"
+        case finder = "Finder"
     }
 }

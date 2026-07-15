@@ -178,6 +178,10 @@ final class BrowserModel: ObservableObject {
     @Published var openTabs: [UUID: Tab] = [:]     // savedID -> live tab
     @Published var selection: Selection?
     @Published var sidebarVisible = true
+    /// The Finder library surface (shown over the content area).
+    @Published var showingFinder = false
+    /// Batch-collect candidates; non-nil presents the collect sheet.
+    @Published var collectCandidates: [CollectCandidate]?
 
     static let maxFavorites = 6
 
@@ -250,20 +254,85 @@ final class BrowserModel: ObservableObject {
         webView.navigationDelegate = coordinator
         webView.uiDelegate = coordinator
         webView.onSaveToFinder = { [weak self, weak webView] url, _ in
-            guard let self else { return }
-            let source = webView?.url?.absoluteString ?? ""
-            let title = webView?.title ?? ""
-            Task { @MainActor in
-                do {
-                    _ = try await self.finder.save(assetURL: url, sourceURL: source, sourceTitle: title)
-                    NotificationCenter.default.post(name: .finderToast, object: "Saved to Finder")
-                } catch {
+            self?.saveToFinder(assetURL: url, from: webView)
+        }
+        return webView
+    }
+
+    // MARK: Finder capture
+
+    /// The one save path every capture flow funnels through: download, toast,
+    /// optional Claude auto-tagging.
+    func saveToFinder(assetURL: URL, from webView: WKWebView?, tags: [String] = [], quiet: Bool = false) {
+        let source = webView?.url?.absoluteString ?? ""
+        let title = webView?.title ?? ""
+        Task { @MainActor in
+            do {
+                let item = try await finder.save(assetURL: assetURL, sourceURL: source,
+                                                 sourceTitle: title, tags: tags)
+                if !quiet { NotificationCenter.default.post(name: .finderToast, object: "Saved to Finder") }
+                if settings.finderAutoTag {
+                    let claude = self.claude, finder = self.finder
+                    Task { await finder.autoTag(item, using: claude) }
+                }
+            } catch {
+                if !quiet {
                     NotificationCenter.default.post(name: .finderToast,
                                                     object: "Couldn't save — \(error.localizedDescription)")
                 }
             }
         }
-        return webView
+    }
+
+    /// ⌥S: save whatever image/video sits under the cursor right now.
+    func saveMediaUnderCursor() {
+        guard let tab = activeTab else { return }
+        tab.webView.evaluateJavaScript("JSON.stringify(window.__runeMedia ? window.__runeMedia() : null)") { [weak self, weak tab] result, _ in
+            guard let json = result as? String, json != "null",
+                  let data = json.data(using: .utf8),
+                  let info = try? JSONDecoder().decode([String: String].self, from: data),
+                  let src = info["src"], let url = URL(string: src) else {
+                Task { @MainActor in
+                    NotificationCenter.default.post(name: .finderToast, object: "No image under the cursor")
+                }
+                return
+            }
+            Task { @MainActor in self?.saveToFinder(assetURL: url, from: tab?.webView) }
+        }
+    }
+
+    /// ⇧⌘S: scan the page and open the batch-collect sheet.
+    func collectFromPage() {
+        guard let tab = activeTab else { return }
+        tab.webView.evaluateJavaScript(PageBridge.collectMediaJS) { [weak self] result, _ in
+            guard let json = result as? String, let data = json.data(using: .utf8),
+                  let found = try? JSONDecoder().decode([CollectCandidate].self, from: data) else { return }
+            Task { @MainActor in
+                guard let self else { return }
+                let min = Int(self.settings.finderMinCollectSize)
+                let kept = found.filter { $0.w == 0 || ($0.w >= min && $0.h >= min) }
+                if kept.isEmpty {
+                    NotificationCenter.default.post(name: .finderToast, object: "Nothing collectable on this page")
+                } else {
+                    self.collectCandidates = kept
+                }
+            }
+        }
+    }
+
+    /// Capture the visible page as an image item.
+    func capturePage() {
+        guard let tab = activeTab else { return }
+        tab.webView.takeSnapshot(with: nil) { [weak self, weak tab] image, _ in
+            guard let self, let tab, let image, let png = image.png else { return }
+            Task { @MainActor in
+                let name = tab.title.isEmpty ? "Page Capture" : tab.title
+                if (try? await self.finder.save(data: png, ext: "png", fileName: name,
+                                                sourceURL: tab.urlString, sourceTitle: tab.title)) != nil {
+                    NotificationCenter.default.post(name: .finderToast, object: "Captured page to Finder")
+                }
+            }
+        }
     }
 
     // MARK: Session tabs
@@ -318,6 +387,7 @@ final class BrowserModel: ObservableObject {
     // MARK: Selection
 
     func select(_ new: Selection) {
+        showingFinder = false
         guard new != selection else { return }
         if settings.autoPiP != .off, let current = activeTab { current.requestPiPIfPlaying() }
         if case .saved(let id) = new, openTabs[id] == nil, let saved = savedTab(id) {
@@ -544,6 +614,7 @@ final class BrowserModel: ObservableObject {
 
     func navigate(_ input: String) {
         guard let url = resolve(input) else { return }
+        showingFinder = false   // typing an address means "browse", not "browse the library"
         let tab = activeTab ?? newTab()
         tab.load(url)
     }

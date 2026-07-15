@@ -166,6 +166,66 @@ final class FinderStore: ObservableObject {
         return item
     }
 
+    /// Save raw data directly (page snapshots, dropped files). Same pipeline,
+    /// no download step.
+    @discardableResult
+    func save(data: Data, ext: String, fileName: String, sourceURL: String, sourceTitle: String,
+              tags: [String] = []) async throws -> FinderItem {
+        var item = FinderItem(fileName: fileName, ext: ext, kind: Self.kind(forExtension: ext),
+                              sourceURL: sourceURL, assetURL: "")
+        item.sourceTitle = sourceTitle
+        item.tags = tags
+        item.byteSize = data.count
+        let folder = dir(for: item.id)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try data.write(to: fileURL(for: item), options: .atomic)
+        if item.kind == .image, let image = NSImage(data: data) {
+            let pixels = image.representations.first.map { ($0.pixelsWide, $0.pixelsHigh) }
+            item.width = pixels?.0; item.height = pixels?.1
+            item.colors = Self.dominantColors(of: image)
+            if let thumb = Self.thumbnail(of: image, maxDimension: 512), let png = thumb.png {
+                try? png.write(to: thumbURL(for: item), options: .atomic)
+            }
+        }
+        writeMetadata(item)
+        items.insert(item, at: 0)
+        return item
+    }
+
+    // MARK: Thumbnails (decoded once, cached — same rationale as FaviconCache)
+
+    private let thumbCache = NSCache<NSString, NSImage>()
+
+    func thumbnail(for item: FinderItem) -> NSImage? {
+        let key = item.id.uuidString as NSString
+        if let hit = thumbCache.object(forKey: key) { return hit }
+        let url = FileManager.default.fileExists(atPath: thumbURL(for: item).path)
+            ? thumbURL(for: item) : fileURL(for: item)
+        guard let img = NSImage(contentsOf: url) else { return nil }
+        thumbCache.setObject(img, forKey: key)
+        return img
+    }
+
+    // MARK: Claude auto-tagging (optional, text-only — cheap and fast)
+
+    /// Suggest tags from the item's context and merge them in. Fails silently;
+    /// tagging is a convenience, never a blocker.
+    func autoTag(_ item: FinderItem, using claude: ClaudeService) async {
+        guard claude.hasKey else { return }
+        let context = "File: \(item.fileName).\(item.ext)\nFrom page: \(item.sourceTitle)\nPage URL: \(item.sourceURL)"
+        guard let answer = try? await claude.complete(
+            system: "You tag saved design inspiration for later retrieval. Reply with ONLY 2-4 short "
+                + "lowercase tags, comma-separated. Concrete subjects and styles, no filler words.",
+            user: context, maxTokens: 30, effort: "low") else { return }
+        let suggested = answer.lowercased()
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0.count < 30 }
+        guard !suggested.isEmpty, var current = items.first(where: { $0.id == item.id }) else { return }
+        current.tags = Array(Set(current.tags).union(suggested)).sorted()
+        update(current)
+    }
+
     // MARK: Metadata edits
 
     func update(_ item: FinderItem) {
@@ -198,6 +258,20 @@ final class FinderStore: ObservableObject {
         return folder
     }
     func persistFolders() { Storage.saveJSON(folders, to: "Finder/folders.json") }
+
+    func renameFolder(_ id: UUID, to name: String) {
+        guard let i = folders.firstIndex(where: { $0.id == id }) else { return }
+        folders[i].name = name; persistFolders()
+    }
+    /// Delete a folder; items keep existing (membership is just metadata).
+    func deleteFolder(_ id: UUID) {
+        folders.removeAll { $0.id == id }
+        for var item in items where item.folderIDs.contains(id) {
+            item.folderIDs.removeAll { $0 == id }
+            update(item)
+        }
+        persistFolders()
+    }
 
     // MARK: Asset analysis (all native)
 
@@ -258,6 +332,15 @@ final class FinderStore: ObservableObject {
             String(format: "#%02X%02X%02X", $0.r / $0.n, $0.g / $0.n, $0.b / $0.n)
         }
     }
+}
+
+/// A page asset found by batch collect.
+struct CollectCandidate: Codable, Identifiable, Equatable {
+    var src: String
+    var w: Int
+    var h: Int
+    var kind: String
+    var id: String { src }
 }
 
 // MARK: - Capture (context menu)
