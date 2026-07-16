@@ -10,16 +10,16 @@ final class SettingsWindowController {
     let history: HistoryStore
     let appearance: AppearanceStore
     let ai: AIService
-    let zoomLevels: ZoomStore
+    let sites: SiteSettings
     /// Resolved lazily: the browser model is built after this controller.
     let model: () -> BrowserModel
 
     init(settings: SettingsStore, shortcuts: ShortcutStore, history: HistoryStore,
-         appearance: AppearanceStore, ai: AIService, zoomLevels: ZoomStore,
+         appearance: AppearanceStore, ai: AIService, sites: SiteSettings,
          model: @escaping () -> BrowserModel) {
         self.settings = settings; self.shortcuts = shortcuts; self.history = history
         self.appearance = appearance; self.ai = ai
-        self.zoomLevels = zoomLevels; self.model = model
+        self.sites = sites; self.model = model
     }
 
     func show() {
@@ -31,7 +31,7 @@ final class SettingsWindowController {
             w.center(); w.setFrameAutosaveName("RuneSettings"); w.isReleasedWhenClosed = false
             w.contentViewController = NSHostingController(rootView: RuneSettingsView(
                 settings: settings, shortcuts: shortcuts, history: history,
-                appearance: appearance, ai: ai, zoomLevels: zoomLevels, model: model))
+                appearance: appearance, ai: ai, sites: sites, model: model))
             window = w
         }
         window?.makeKeyAndOrderFront(nil)
@@ -45,7 +45,7 @@ private struct RuneSettingsView: View {
     @ObservedObject var history: HistoryStore
     @ObservedObject var appearance: AppearanceStore
     @ObservedObject var ai: AIService
-    @ObservedObject var zoomLevels: ZoomStore
+    @ObservedObject var sites: SiteSettings
     let model: () -> BrowserModel
 
     enum Tab: String, CaseIterable { case appearance = "Appearance", presets = "Presets", browsing = "Browsing", ai = "AI", shortcuts = "Shortcuts" }
@@ -62,7 +62,7 @@ private struct RuneSettingsView: View {
             case .appearance: AppearancePane(appearance: appearance)
             case .presets: PresetsPane(appearance: appearance)
             case .browsing: BrowsingPane(settings: settings, history: history,
-                                         zoomLevels: zoomLevels, model: model)
+                                         sites: sites, model: model)
             case .ai: AIPane(ai: ai, settings: settings)
             case .shortcuts: ShortcutsPane(shortcuts: shortcuts)
             }
@@ -296,7 +296,7 @@ private struct PresetsPane: View {
 private struct BrowsingPane: View {
     @ObservedObject var settings: SettingsStore
     @ObservedObject var history: HistoryStore
-    @ObservedObject var zoomLevels: ZoomStore
+    @ObservedObject var sites: SiteSettings
     let model: () -> BrowserModel
 
     @State private var importing = false
@@ -327,6 +327,27 @@ private struct BrowsingPane: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
+                Toggle("Block ads and trackers", isOn: $settings.blockContent)
+                if settings.blockContent {
+                    Toggle("Hide cookie banners", isOn: $settings.hideCookieBanners)
+                }
+                LabeledContent("Sites you've excepted") {
+                    HStack {
+                        Text("\(sites.blockingExceptions.count)").foregroundStyle(.secondary)
+                        Button("Clear") {
+                            for host in sites.blockingExceptions { sites.setBlocking(nil, for: host) }
+                            model().reloadBlocking()
+                        }
+                        .disabled(sites.blockingExceptions.isEmpty)
+                    }
+                }
+            } header: {
+                Text("Content Blocking")
+            } footer: {
+                Text("WebKit compiles the rules once and enforces them itself, so a blocked request is never made and the page pays nothing for it. \"\(Command.toggleBlocking.title)\" in the View menu makes an exception for wherever you are. Cookie banners are hidden rather than answered — a wall that locks scrolling may still lock it.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
                 Toggle("Reopen last session's tabs on launch", isOn: $settings.restoreSession)
             } header: {
                 Text("Session")
@@ -347,9 +368,9 @@ private struct BrowsingPane: View {
             Section {
                 LabeledContent("Zoomed sites") {
                     HStack {
-                        Text("\(zoomLevels.levels.count)").foregroundStyle(.secondary)
-                        Button("Reset All") { zoomLevels.clear() }
-                            .disabled(zoomLevels.levels.isEmpty)
+                        Text("\(sites.zoomedHosts)").foregroundStyle(.secondary)
+                        Button("Reset All") { sites.clearZoom() }
+                            .disabled(sites.zoomedHosts == 0)
                     }
                 }
             } header: {

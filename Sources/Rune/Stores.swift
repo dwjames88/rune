@@ -43,24 +43,88 @@ enum ZoomChange {
     }
 }
 
-/// Page zoom per site. Keyed by host: zoom is a property of the place, not of
-/// the tab you happened to open it in.
+/// What Rune remembers about one site.
+///
+/// Absent fields mean "no opinion", which is the difference between a store
+/// that stays small and one that accumulates a row for every site you ever
+/// pressed ⌘0 on.
+struct SiteSetting: Codable, Equatable {
+    /// nil = 100%.
+    var zoom: Double?
+    /// nil = follow the global content-blocking setting.
+    var blockContent: Bool?
+
+    var isEmpty: Bool { zoom == nil && blockContent == nil }
+}
+
+/// Everything remembered per site, keyed by host — because these are properties
+/// of the place, not of the tab you happened to open it in.
+///
+/// Zoom used to have a store of its own, and blocking exceptions would have
+/// needed an identical one: a host dictionary, the same debounced write, the
+/// same "absence means default" rule. One store instead of two, and the next
+/// per-site thing costs a field rather than a file.
 @MainActor
-final class ZoomStore: ObservableObject {
-    @Published private(set) var levels: [String: Double]
+final class SiteSettings: ObservableObject {
+    @Published private(set) var sites: [String: SiteSetting]
 
-    init() { levels = Storage.loadJSON([String: Double].self, from: "zoom.json") ?? [:] }
-
-    func level(for host: String) -> Double { levels[host] ?? 1 }
-
-    func set(_ level: Double, for host: String) {
-        // 100% is the absence of a setting, not a stored value — otherwise
-        // zoom.json fills up with every site you ever pressed ⌘0 on.
-        if abs(level - 1) < 0.001 { levels.removeValue(forKey: host) } else { levels[host] = level }
-        save()
+    init() {
+        sites = Storage.loadJSON([String: SiteSetting].self, from: "sites.json")
+            ?? Self.migratedFromZoom()
     }
 
-    func clear() { levels = [:]; flush() }
+    /// zoom.json was the whole store before this one existed; carry it over
+    /// once rather than silently resetting everyone's zoom.
+    private static func migratedFromZoom() -> [String: SiteSetting] {
+        guard let levels = Storage.loadJSON([String: Double].self, from: "zoom.json") else { return [:] }
+        let migrated = levels.mapValues { SiteSetting(zoom: $0) }
+        Storage.saveJSON(migrated, to: "sites.json")
+        Storage.remove("zoom.json")
+        return migrated
+    }
+
+    // MARK: Zoom
+
+    func zoom(for host: String) -> Double { sites[host]?.zoom ?? 1 }
+
+    func setZoom(_ level: Double, for host: String) {
+        // 100% is the absence of a setting, not a stored value.
+        update(host) { $0.zoom = abs(level - 1) < 0.001 ? nil : level }
+    }
+
+    var zoomedHosts: Int { sites.values.filter { $0.zoom != nil }.count }
+
+    func clearZoom() {
+        for host in sites.keys { update(host) { $0.zoom = nil } }
+        flush()
+    }
+
+    // MARK: Content blocking
+
+    /// Hosts you've told Rune to leave alone. Compiled into the rule list, so
+    /// an exception costs nothing at request time.
+    var blockingExceptions: [String] {
+        sites.compactMap { $0.value.blockContent == false ? $0.key : nil }
+    }
+
+    func blocks(_ host: String, default global: Bool) -> Bool {
+        sites[host]?.blockContent ?? global
+    }
+
+    func setBlocking(_ on: Bool?, for host: String) {
+        update(host) { $0.blockContent = on }
+        flush()   // the rule list recompiles off this; don't make it wait
+    }
+
+    // MARK: Storage
+
+    private func update(_ host: String, _ mutate: (inout SiteSetting) -> Void) {
+        var setting = sites[host] ?? SiteSetting()
+        mutate(&setting)
+        // Don't keep a row that no longer says anything.
+        if setting.isEmpty { sites.removeValue(forKey: host) } else { sites[host] = setting }
+        save()
+    }
 
     // Holding ⌘+ fires a burst; coalesce it into one write.
     private var saveTask: Task<Void, Never>?
@@ -74,7 +138,7 @@ final class ZoomStore: ObservableObject {
     }
     func flush() {
         saveTask?.cancel(); saveTask = nil
-        Storage.saveJSON(levels, to: "zoom.json")
+        Storage.saveJSON(sites, to: "sites.json")
     }
 }
 
@@ -164,6 +228,11 @@ final class SettingsStore: ObservableObject {
     /// Which model runs Rune's AI. On-device by default — free, private and
     /// offline; Claude is the upgrade you opt into.
     @Published var aiModel: AIModel { didSet { save() } }
+    /// Block ads and trackers. On by default: it's the single biggest thing
+    /// WebKit will do for a page's speed and privacy for free.
+    @Published var blockContent: Bool { didSet { save(); blockingChanged() } }
+    /// Hide cookie-consent walls along with the trackers.
+    @Published var hideCookieBanners: Bool { didSet { save(); blockingChanged() } }
     /// Where finished downloads land.
     @Published var downloadLocation: DownloadLocation { didSet { save() } }
     /// Reopen last session's tabs on launch. Off by design: session tabs are
@@ -188,6 +257,8 @@ final class SettingsStore: ObservableObject {
         var downloadLocation: DownloadLocation?
         var restoreSession: Bool?
         var aiModel: AIModel?
+        var blockContent: Bool?
+        var hideCookieBanners: Bool?
     }
 
     init() {
@@ -206,6 +277,8 @@ final class SettingsStore: ObservableObject {
         downloadLocation = saved?.downloadLocation ?? .downloadsFolder
         restoreSession = saved?.restoreSession ?? false
         aiModel = saved?.aiModel ?? .onDevice
+        blockContent = saved?.blockContent ?? true
+        hideCookieBanners = saved?.hideCookieBanners ?? true
     }
     private func save() {
         Storage.saveJSON(Payload(searchEngine: searchEngine, customEngines: customEngines,
@@ -215,11 +288,15 @@ final class SettingsStore: ObservableObject {
                                  linkHoverEnabled: linkHoverEnabled, linkHoverDelay: linkHoverDelay,
                                  finderAutoTag: finderAutoTag, finderMinCollectSize: finderMinCollectSize,
                                  downloadLocation: downloadLocation, restoreSession: restoreSession,
-                                 aiModel: aiModel),
+                                 aiModel: aiModel, blockContent: blockContent,
+                                 hideCookieBanners: hideCookieBanners),
                          to: "settings.json")
     }
     private func hoverChanged() {
         NotificationCenter.default.post(name: .hoverSettingsChanged, object: nil)
+    }
+    private func blockingChanged() {
+        NotificationCenter.default.post(name: .blockingSettingsChanged, object: nil)
     }
 }
 
@@ -396,4 +473,5 @@ extension Notification.Name {
     static let frontBrowserWindow = Notification.Name("rune.frontBrowserWindow")
     static let showFindBar = Notification.Name("rune.showFindBar")
     static let showDownloads = Notification.Name("rune.showDownloads")
+    static let blockingSettingsChanged = Notification.Name("rune.blockingSettingsChanged")
 }

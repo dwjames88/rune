@@ -9,6 +9,10 @@
 feature ships as its own **+0.01** (v1.01, v1.02, …): one feature at a time,
 verified on device, versioned, then the next. Nothing rolls out half-built.
 
+**v1.1 = Tier 2 complete, and the next public build.** Everything between is a
+dev build: committed and versioned, but not packaged or released. v1.01 was the
+last thing handed out; the next one people can download is v1.1.
+
 What the field considers table stakes vs. flagship, diffed against Rune's
 current state. Everything below is implementable with native frameworks only.
 Sources: arc.net, zen-browser.app, vivaldi.com/features, diabrowser.com,

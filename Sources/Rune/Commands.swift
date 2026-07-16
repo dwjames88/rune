@@ -26,6 +26,7 @@ enum Command: String, CaseIterable, Identifiable {
     case zoomReset
     case printPage
     case showDownloads
+    case toggleBlocking
     case muteTab
     case newPrivateWindow
     case openFinder
@@ -59,6 +60,7 @@ enum Command: String, CaseIterable, Identifiable {
         case .zoomReset: "Actual Size"
         case .printPage: "Print…"
         case .showDownloads: "Downloads"
+        case .toggleBlocking: "Block Content on This Site"
         case .muteTab: "Mute / Unmute Tab"
         case .newPrivateWindow: "New Private Window"
         case .openFinder: "Open Finder"
@@ -93,6 +95,7 @@ enum Command: String, CaseIterable, Identifiable {
         case .zoomReset: "1.magnifyingglass"
         case .printPage: "printer"
         case .showDownloads: "arrow.down.circle"
+        case .toggleBlocking: "shield"
         case .muteTab: "speaker.slash"
         case .newPrivateWindow: "eyeglasses.slash"
         case .openFinder: "sparkles.rectangle.stack"
@@ -107,7 +110,7 @@ enum Command: String, CaseIterable, Identifiable {
     var menu: MenuSection {
         switch self {
         case .newTab, .closeTab, .undoCloseTab, .newPrivateWindow, .copyURL, .printPage, .pinTab: .file
-        case .reload, .findInPage, .zoomIn, .zoomOut, .zoomReset, .muteTab, .showDownloads,
+        case .reload, .findInPage, .zoomIn, .zoomOut, .zoomReset, .muteTab, .showDownloads, .toggleBlocking,
              .toggleSidebar, .togglePiP, .commandPalette, .askPage: .view
         case .goBack, .goForward: .history
         case .focusAddress, .nextTab, .previousTab: .navigate
@@ -140,6 +143,7 @@ enum Command: String, CaseIterable, Identifiable {
         case .zoomReset: ("0", .command)
         case .printPage: ("p", .command)
         case .showDownloads: ("l", [.command, .option])
+        case .toggleBlocking: ("", [])
         case .muteTab: ("m", [.command, .control])
         case .newPrivateWindow: ("n", [.command, .shift])
         case .openFinder: ("f", [.command, .option])

@@ -210,7 +210,8 @@ final class BrowserModel: ObservableObject {
     let ai: AIService
     let finder: FinderStore
     let downloads: DownloadStore
-    let zoomLevels: ZoomStore
+    let sites: SiteSettings
+    let blocker: ContentBlocker
 
     /// A private window: nothing it does touches the disk. Its web views share
     /// no cookies or cache with the rest of Rune, its pages never reach
@@ -223,10 +224,10 @@ final class BrowserModel: ObservableObject {
 
     init(settings: SettingsStore, history: HistoryStore, shortcuts: ShortcutStore,
          ai: AIService, finder: FinderStore, downloads: DownloadStore,
-         zoomLevels: ZoomStore, isPrivate: Bool = false) {
+         sites: SiteSettings, blocker: ContentBlocker, isPrivate: Bool = false) {
         self.settings = settings; self.history = history; self.shortcuts = shortcuts
         self.ai = ai; self.finder = finder; self.downloads = downloads
-        self.zoomLevels = zoomLevels; self.isPrivate = isPrivate
+        self.sites = sites; self.blocker = blocker; self.isPrivate = isPrivate
         let config = WKWebViewConfiguration()
         config.websiteDataStore = isPrivate ? .nonPersistent() : .default()
         config.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -247,9 +248,28 @@ final class BrowserModel: ObservableObject {
             forName: .hoverSettingsChanged, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.applyHoverSettings() }
         }
+        blockingObserver = NotificationCenter.default.addObserver(
+            forName: .blockingSettingsChanged, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reloadBlocking() }
+        }
+        // Rules attach to the configuration every web view is built from, so
+        // this covers tabs that don't exist yet — including a private window's,
+        // which gets blocking for free.
+        reloadBlocking()
     }
 
     private var hoverObserver: (any NSObjectProtocol)?
+    private var blockingObserver: (any NSObjectProtocol)?
+
+    /// Recompile if the rules changed, then hand them to the configuration and
+    /// to every page already open.
+    func reloadBlocking() {
+        Task { @MainActor in
+            await blocker.reload()
+            blocker.apply(to: configuration.userContentController)
+            for tab in allTabs { blocker.apply(to: tab.webView.configuration.userContentController) }
+        }
+    }
 
     /// Every live web view this window owns.
     var allTabs: [Tab] { sessionTabs + Array(openTabs.values) }
@@ -725,15 +745,38 @@ final class BrowserModel: ObservableObject {
     /// every open tab on that host moves together and the next visit remembers.
     func zoom(_ change: ZoomChange) {
         guard let host = activeTab?.webView.url?.host else { return }
-        zoomLevels.set(change.applied(to: zoomLevels.level(for: host)), for: host)
+        sites.setZoom(change.applied(to: sites.zoom(for: host)), for: host)
         for tab in allTabs where tab.webView.url?.host == host { applyZoom(to: tab) }
     }
 
     /// Put a tab at its site's remembered level. Called on every commit, so it
     /// has to no-op cheaply for the overwhelmingly common 100% case.
     func applyZoom(to tab: Tab) {
-        let level = tab.webView.url?.host.map { zoomLevels.level(for: $0) } ?? 1
+        let level = tab.webView.url?.host.map { sites.zoom(for: $0) } ?? 1
         if abs(tab.webView.pageZoom - level) > 0.001 { tab.webView.pageZoom = level }
+    }
+
+    // MARK: Content blocking
+
+    /// Is blocking on for the site you're looking at?
+    var blocksActiveSite: Bool {
+        guard let host = activeTab?.webView.url?.host else { return settings.blockContent }
+        return settings.blockContent && sites.blocks(host, default: true)
+    }
+
+    /// "Don't block on this site". Recompiling is what applies it — exceptions
+    /// live inside the rule list, so nothing is checked per request. Reloads the
+    /// page after, since a rule change can't reach requests already made.
+    func toggleBlockingForActiveSite() {
+        guard let host = activeTab?.webView.url?.host else { return }
+        let blocking = sites.blocks(host, default: true)
+        // Back to nil rather than `true` when re-enabling: no opinion is not the
+        // same as an opinion that happens to match, and it keeps sites.json small.
+        sites.setBlocking(blocking ? false : nil, for: host)
+        reloadBlocking()
+        NotificationCenter.default.post(name: .finderToast,
+                                        object: blocking ? "Not blocking on \(host)" : "Blocking on \(host)")
+        reload()
     }
 
     // MARK: Page actions
@@ -804,10 +847,13 @@ final class BrowserModel: ObservableObject {
     func resolve(_ input: String) -> URL? {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
+        // An explicit scheme means you typed a destination, whatever else it
+        // looks like. This has to come first: "http://localhost:8765" has no
+        // dot in it, and the guess below would otherwise hand it to Google.
+        if text.hasPrefix("http://") || text.hasPrefix("https://") { return URL(string: text) }
         if text.contains(" ") || (!text.contains(".") && text != "localhost") {
             return settings.searchEngine.url(for: text)
         }
-        if text.hasPrefix("http://") || text.hasPrefix("https://") { return URL(string: text) }
         return URL(string: "https://\(text)")
     }
 }
