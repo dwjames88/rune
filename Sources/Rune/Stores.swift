@@ -223,6 +223,18 @@ enum NewTabBehavior: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// What happens when another app opens a link and Rune is your default browser.
+enum ExternalLinkBehavior: String, Codable, CaseIterable, Identifiable {
+    case newTab, segment
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .newTab: "A new tab"
+        case .segment: "Its own window (Segment)"
+        }
+    }
+}
+
 /// Where a fresh tab lands in the session list.
 enum NewTabPlacement: String, Codable, CaseIterable, Identifiable {
     case end, nextToActive
@@ -255,6 +267,8 @@ final class SettingsStore: ObservableObject {
     /// Which model runs Rune's AI. On-device by default — free, private and
     /// offline; Claude is the upgrade you opt into.
     @Published var aiModel: AIModel { didSet { save() } }
+    /// A link handed to Rune by another app: a tab, or a window of its own.
+    @Published var externalLinks: ExternalLinkBehavior { didSet { save() } }
     /// Block ads and trackers. On by default: it's the single biggest thing
     /// WebKit will do for a page's speed and privacy for free.
     @Published var blockContent: Bool { didSet { save(); blockingChanged() } }
@@ -286,6 +300,7 @@ final class SettingsStore: ObservableObject {
         var aiModel: AIModel?
         var blockContent: Bool?
         var hideCookieBanners: Bool?
+        var externalLinks: ExternalLinkBehavior?
     }
 
     init() {
@@ -304,6 +319,7 @@ final class SettingsStore: ObservableObject {
         downloadLocation = saved?.downloadLocation ?? .downloadsFolder
         restoreSession = saved?.restoreSession ?? false
         aiModel = saved?.aiModel ?? .onDevice
+        externalLinks = saved?.externalLinks ?? .segment
         blockContent = saved?.blockContent ?? true
         hideCookieBanners = saved?.hideCookieBanners ?? true
     }
@@ -316,7 +332,8 @@ final class SettingsStore: ObservableObject {
                                  finderAutoTag: finderAutoTag, finderMinCollectSize: finderMinCollectSize,
                                  downloadLocation: downloadLocation, restoreSession: restoreSession,
                                  aiModel: aiModel, blockContent: blockContent,
-                                 hideCookieBanners: hideCookieBanners),
+                                 hideCookieBanners: hideCookieBanners,
+                                 externalLinks: externalLinks),
                          to: "settings.json")
     }
     private func hoverChanged() {
@@ -493,5 +510,6 @@ extension Notification.Name {
     static let showFindBar = Notification.Name("rune.showFindBar")
     static let showDownloads = Notification.Name("rune.showDownloads")
     static let showNewTabOverlay = Notification.Name("rune.showNewTabOverlay")
+    static let glanceLink = Notification.Name("rune.glanceLink")
     static let blockingSettingsChanged = Notification.Name("rune.blockingSettingsChanged")
 }

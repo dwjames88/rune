@@ -321,10 +321,13 @@ private struct BrowsingPane: View {
                 Picker("Place new tabs", selection: $settings.newTabPlacement) {
                     ForEach(NewTabPlacement.allCases) { Text($0.label).tag($0) }
                 }
+                Picker("Links from other apps open in", selection: $settings.externalLinks) {
+                    ForEach(ExternalLinkBehavior.allCases) { Text($0.label).tag($0) }
+                }
             } header: {
                 Text("New Tabs")
             } footer: {
-                Text("⌘T never stacks empty tabs — if a start page is already open, it's focused instead.")
+                Text("⌘T never stacks empty tabs — if a start page is already open, it's focused instead. A Segment is a window holding just that page, with one button to keep it; ⇧-click any link to peek at it the same way.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {

@@ -63,14 +63,23 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
                           select: !navigationAction.opensInBackground)
     }
 
-    /// ⌘-click opens a link in a background tab, ⇧⌘-click in a foreground one.
-    /// Left to itself WebKit would just navigate the current page.
+    /// ⌘-click opens a link in a background tab, ⇧⌘-click in a foreground one,
+    /// and ⇧-click peeks it in a window that floats over this one. Left to
+    /// itself WebKit would just navigate the current page.
+    ///
+    /// ⌥-click is deliberately untouched: macOS spends that on downloading a
+    /// link, and Rune has downloads now.
     func webView(_ webView: WKWebView,
                  decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
-        if navigationAction.navigationType == .linkActivated,
-           navigationAction.modifierFlags.contains(.command),
-           let url = navigationAction.request.url {
+        guard navigationAction.navigationType == .linkActivated,
+              let url = navigationAction.request.url else { return .allow }
+        let flags = navigationAction.modifierFlags
+        if flags.contains(.command) {
             model?.newTab(url: url, select: !navigationAction.opensInBackground)
+            return .cancel
+        }
+        if flags.contains(.shift) {
+            NotificationCenter.default.post(name: .glanceLink, object: url)
             return .cancel
         }
         return .allow

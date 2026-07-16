@@ -844,6 +844,15 @@ final class BrowserModel: ObservableObject {
         }
     }
 
+    /// A tab that belongs to no list — for a window that holds exactly one
+    /// page. It browses as the current space's profile, because a peek at a
+    /// link should be signed in as whoever you currently are.
+    func detachedTab(url: URL) -> Tab {
+        let tab = Tab(webView: makeWebView())
+        tab.load(url)
+        return tab
+    }
+
     func adoptPopup(configuration: WKWebViewConfiguration, select: Bool = true) -> WKWebView {
         let webView = makeWebView(configuration: configuration)
         let tab = Tab(webView: webView)

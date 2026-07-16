@@ -98,13 +98,16 @@ All shipped. Kept here as the map of what landed where.
    The preset half already exists. The biggest refactor in Tier 2: it
    restructures tabs.json, so it needs a migration and a verified round trip.
 
-5. **Glance** — peek a link in a floating temporary view, then promote it to a
-   tab or dismiss it. Chains after the hover summary: summary → peek → tab.
+5. **Glance** — ✅ **DONE (v1.07)**. ⇧-click any link to peek it in a window
+   floating over what you're reading; "Open as Tab" (⌘↩) keeps it, esc drops it.
+   ⌥-click stays untouched — macOS spends that on downloading a link.
 
-6. **Rune Segment (Little Arc)** — a standalone window for a URL opened from
-   another app while Rune is the default browser. Like a Safari popup but
-   lighter, and the thing that makes a website feel like its own app.
-   Shares one primitive with Glance: a floating window hosting a live Tab.
+6. **Rune Segment (Little Arc)** — ✅ **DONE (v1.07)**. A URL handed to Rune by
+   another app gets its own window instead of barging into your tabs. Setting:
+   Browsing ▸ "Links from other apps open in"; defaults to Segment.
+   - One primitive with Glance (`Detached.swift`): a window holding a single
+     live Tab. They differ by whether it floats and what opens it — nothing
+     else, which is why there's one of them.
 
 7. **The rest, by appetite** — web panels (pin a chat/music site in the
    sidebar; the same "a Tab rendered somewhere else" primitive again) · tab

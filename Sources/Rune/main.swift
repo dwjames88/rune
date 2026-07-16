@@ -32,6 +32,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// private windows. Stays small, so a linear lookup is the right tool.
     private var browsers: [(window: NSWindow, model: BrowserModel)] = []
 
+    /// Glances and segments. They hold themselves open (isReleasedWhenClosed is
+    /// off) and drop out of here when their window goes.
+    private var detached: [DetachedWindow] = []
+
     /// Commands act on the browser window you're actually looking at, which is
     /// what makes a private window feel like its own browser rather than a
     /// second view onto the main one.
@@ -77,6 +81,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         center.addObserver(self, selector: #selector(buildMenu), name: .shortcutsChanged, object: nil)
         center.addObserver(self, selector: #selector(applyWindowChrome), name: .appearanceChanged, object: nil)
         center.addObserver(self, selector: #selector(frontBrowserWindow), name: .frontBrowserWindow, object: nil)
+        center.addObserver(forName: .glanceLink, object: nil, queue: .main) { [weak self] note in
+            // Pull the URL out before hopping: a Notification isn't Sendable,
+            // and a URL is.
+            let url = note.object as? URL
+            MainActor.assumeIsolated {
+                guard let url else { return }
+                self?.detach(url, floating: true)
+            }
+        }
 
         // System-wide capture: "Save to Rune Finder" in every app's Services
         // menu (declared in Info.plist; handled below).
@@ -119,6 +132,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         browsers.append((window, browserModel))
         return window
+    }
+
+    /// One page, one window. Floating = a glance: peek a link over what you're
+    /// reading. Not floating = a segment: a link another app handed us, which
+    /// deserves a window rather than a place in your tabs.
+    private func detach(_ url: URL, floating: Bool) {
+        let owner = frontModel
+        detached.append(DetachedWindow(
+            tab: owner.detachedTab(url: url),
+            floating: floating,
+            appearance: appearance,
+            promote: { [weak self] tab in
+                // Keep it: the page moves into tabs at the URL it ended on, not
+                // the one it started at — you may have clicked through.
+                guard let url = tab.webView.url else { return }
+                owner.newTab(url: url)
+                self?.window?.makeKeyAndOrderFront(nil)
+            },
+            onClose: { [weak self] window in self?.detached.removeAll { $0 === window } }))
     }
 
     /// A window that leaves nothing behind: its own ephemeral data store, no
@@ -172,6 +204,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 Task { @MainActor in
                     if (try? await finder.importFile(url)) != nil { savedFeedback() }
                 }
+            } else if settings.externalLinks == .segment {
+                // A link from another app is a visit, not a commitment.
+                detach(url, floating: false)
             } else {
                 model.newTab(url: url)
                 window?.makeKeyAndOrderFront(nil)
