@@ -1,5 +1,14 @@
 # Rune roadmap — from surveying Arc, Zen, Vivaldi, Dia, Orion, Safari (2026-07)
 
+## Versioning
+
+`VERSION` at the repo root is the one source of truth — `dev-run.sh` and
+`package.sh` both read it, nothing hardcodes a number.
+
+**v1.00** = Tier 1 complete, and the baseline Tier 2 starts from. Each Tier 2
+feature ships as its own **+0.01** (v1.01, v1.02, …): one feature at a time,
+verified on device, versioned, then the next. Nothing rolls out half-built.
+
 What the field considers table stakes vs. flagship, diffed against Rune's
 current state. Everything below is implementable with native frameworks only.
 Sources: arc.net, zen-browser.app, vivaldi.com/features, diabrowser.com,

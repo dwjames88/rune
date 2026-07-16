@@ -35,7 +35,7 @@ struct FindBar: View {
                     .font(appearance.font(11)).monospacedDigit()
                     .foregroundStyle(appearance.secondaryText(on: appearance.chrome))
             }
-            step("chevron.up", "Previous match (⇧↩)") { find(forward: false) }
+            step("chevron.up", "Previous match") { find(forward: false) }
             step("chevron.down", "Next match (↩)") { find(forward: true) }
             Divider().frame(height: 14)
             Button(action: close) { Image(systemName: "xmark").font(.system(size: 10, weight: .medium)) }
@@ -74,12 +74,18 @@ struct FindBar: View {
         configuration.backwards = !forward
         configuration.caseSensitive = false
         configuration.wraps = true
+        // Typing outruns the page: every keystroke starts a search, and they
+        // don't come back in order. A keystroke that's already been superseded
+        // must not report its answer over a newer one's.
+        let searched = query
         Task {
             if fromTop {
-                await recount(in: webView)
+                await recount(searched, in: webView)
+                guard searched == query else { return }
                 _ = try? await webView.evaluateJavaScript(Self.clearSelectionJS)
             }
-            let found = (try? await webView.find(query, configuration: configuration))?.matchFound ?? false
+            let found = (try? await webView.find(searched, configuration: configuration))?.matchFound ?? false
+            guard searched == query else { return }
             missing = !found
             guard found, matches > 0 else { current = 0; return }
             // We control where every search starts, so the position follows
@@ -99,9 +105,10 @@ struct FindBar: View {
     /// once WebKit's find also sees, and it leaves out what the page hides.
     /// The total can still drift from WebKit's own idea on exotic pages (text
     /// inside subframes); it only decides where the counter wraps.
-    private func recount(in webView: WKWebView) async {
+    private func recount(_ needle: String, in webView: WKWebView) async {
         let count = try? await webView.callAsyncJavaScript(
-            Self.countJS, arguments: ["q": query], in: nil, contentWorld: .page)
+            Self.countJS, arguments: ["q": needle], in: nil, contentWorld: .page)
+        guard needle == query else { return }
         matches = (count as? Int) ?? Int((count as? Double) ?? 0)
     }
 

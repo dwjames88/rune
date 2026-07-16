@@ -43,8 +43,11 @@ final class DownloadItem: ObservableObject, Identifiable {
         self.source = source
         self.download = download
 
-        // Progress ticks per packet; the UI can't use more than a few frames a
-        // second, so throttle rather than republish on every byte.
+        // Progress is KVO, and it fires from whatever thread moved the bytes —
+        // so both of these have to be brought back to the main actor before
+        // they touch anything published. Progress also ticks per packet, and
+        // the UI can't use more than a few frames a second, so the byte count
+        // is throttled rather than republished on every one.
         let progress = download.progress
         progress.publisher(for: \.completedUnitCount)
             .throttle(for: .milliseconds(150), scheduler: RunLoop.main, latest: true)
@@ -52,6 +55,7 @@ final class DownloadItem: ObservableObject, Identifiable {
             .store(in: &cancellables)
         progress.publisher(for: \.totalUnitCount)
             .removeDuplicates()
+            .receive(on: RunLoop.main)
             .sink { [weak self] in self?.total = $0 }
             .store(in: &cancellables)
     }

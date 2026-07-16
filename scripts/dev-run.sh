@@ -7,6 +7,8 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
 CONFIG="${1:-debug}"
+# One source of truth for the version — packaging reads the same file.
+VERSION="$(cat "$REPO_ROOT/VERSION")"
 swift build -c "$CONFIG" >/dev/null
 BIN="$(swift build -c "$CONFIG" --show-bin-path)/Rune"
 
@@ -64,7 +66,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleIdentifier</key><string>com.dwjames.Rune</string>
     <key>CFBundleExecutable</key><string>Rune</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.1.0</string>
+    <key>CFBundleShortVersionString</key><string>$VERSION</string>
     <key>CFBundleIconFile</key><string>Rune</string>
     <key>CFBundleIconName</key><string>Rune</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>

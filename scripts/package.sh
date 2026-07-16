@@ -6,7 +6,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-VERSION="${1:-0.1.0}"
+# Defaults to the VERSION file; pass an argument to override for a one-off.
+VERSION="${1:-$(cat "$REPO_ROOT/VERSION")}"
 
 echo "› Building release"
 swift build -c release >/dev/null
