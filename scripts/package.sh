@@ -104,12 +104,24 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-IDENTITY_HASH="$(security find-identity -v -p codesigning | awk 'NR==1 && /[0-9A-F]{40}/ {print $2}')"
+# Distribution signing is not dev signing. Only a Developer ID certificate is
+# meant to leave this Mac, and it's the one notarization accepts — so take that
+# if it exists and give it a secure timestamp, which is what keeps a build
+# working after the certificate expires.
+#
+# Deliberately NOT falling back to an "Apple Development" identity: that cert is
+# for this machine, we can't notarize with it, and without a timestamp every
+# copy handed out stops launching the day it expires. Ad-hoc never expires, and
+# until there's a Developer ID, Gatekeeper treats both exactly the same — it
+# objects to the missing notarization, not to the certificate.
+IDENTITY_HASH="$(security find-identity -v -p codesigning | awk '/Developer ID Application/ { print $2; exit }')"
 if [ -n "$IDENTITY_HASH" ]; then
-    echo "› Signing with identity $IDENTITY_HASH"
-    codesign --force --sign "$IDENTITY_HASH" --timestamp=none "$APP"
+    echo "› Signing with Developer ID $IDENTITY_HASH"
+    codesign --force --options runtime --timestamp --sign "$IDENTITY_HASH" "$APP"
+    echo "› Next: notarize — xcrun notarytool submit dist/Rune.zip --wait && xcrun stapler staple $APP"
 else
-    echo "› No Developer identity found — ad-hoc signing"
+    echo "› No Developer ID certificate — ad-hoc signing."
+    echo "  The build works, but macOS will ask each tester to allow it once."
     codesign --force --sign - "$APP"
 fi
 codesign --verify --verbose "$APP" 2>&1 | sed 's/^/  /'
