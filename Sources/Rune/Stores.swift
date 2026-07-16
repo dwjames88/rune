@@ -184,7 +184,7 @@ enum AutoPiPMode: String, Codable, CaseIterable, Identifiable {
 
 /// What a fresh tab opens with.
 enum NewTabBehavior: String, Codable, CaseIterable, Identifiable {
-    case startPage, homePage, duplicateCurrent, lastClosed
+    case startPage, homePage, duplicateCurrent, lastClosed, addressOverlay
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -192,6 +192,7 @@ enum NewTabBehavior: String, Codable, CaseIterable, Identifiable {
         case .homePage: "Home page"
         case .duplicateCurrent: "Duplicate current tab"
         case .lastClosed: "Last closed tab"
+        case .addressOverlay: "An address bar"
         }
     }
 }
@@ -473,5 +474,6 @@ extension Notification.Name {
     static let frontBrowserWindow = Notification.Name("rune.frontBrowserWindow")
     static let showFindBar = Notification.Name("rune.showFindBar")
     static let showDownloads = Notification.Name("rune.showDownloads")
+    static let showNewTabOverlay = Notification.Name("rune.showNewTabOverlay")
     static let blockingSettingsChanged = Notification.Name("rune.blockingSettingsChanged")
 }

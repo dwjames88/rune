@@ -335,7 +335,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         switch command {
         case .commandPalette: show(.showCommandPalette)
         case .askPage: show(.showAskBar)
-        case .newTab: model.newTab()
+        case .newTab:
+            if settings.newTabBehavior == .addressOverlay { show(.showNewTabOverlay) }
+            else { model.newTab() }
         case .closeTab:
             // ⌘W closes the window you're looking at, not a hidden tab.
             if finderWindow.isKey { finderWindow.close() } else { model.closeActive() }
@@ -354,6 +356,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .printPage: model.printPage()
         case .showDownloads: show(.showDownloads)
         case .toggleBlocking: model.toggleBlockingForActiveSite()
+        case .toggleSplit: model.toggleSplit()
         case .muteTab: model.activeTab?.toggleMute()
         case .newPrivateWindow: newPrivateWindow()
         case .openFinder: finderWindow.toggle()

@@ -196,6 +196,12 @@ final class BrowserModel: ObservableObject {
     @Published var sessionTabs: [Tab] = []
     @Published var openTabs: [UUID: Tab] = [:]     // savedID -> live tab
     @Published var selection: Selection?
+    /// The second pane, when you're in Split View. A split is two tabs shown at
+    /// once, not a new kind of tab — so it's just a second selection.
+    @Published var splitSelection: Selection?
+    /// Which pane commands act on. Meaningless without a split, and reset
+    /// whenever one closes.
+    @Published var focusedPane: Pane = .primary
     @Published var sidebarVisible = true
     /// Batch-collect candidates; non-nil presents the collect sheet.
     @Published var collectCandidates: [CollectCandidate]?
@@ -309,12 +315,73 @@ final class BrowserModel: ObservableObject {
 
     // MARK: Live tab lookup
 
-    var activeTab: Tab? { selection.flatMap(tab(for:)) }
+    /// The pane a command lands in. Without a split there is only `.primary`,
+    /// which is why every command written before Split View still reads
+    /// `activeTab` and means the right thing.
+    enum Pane: Equatable { case primary, secondary }
+
+    /// What's showing in the pane you last touched.
+    var activeTab: Tab? { currentSelection.flatMap(tab(for:)) }
+
+    var currentSelection: Selection? {
+        focusedPane == .secondary ? splitSelection : selection
+    }
+
+    private var otherSelection: Selection? {
+        focusedPane == .secondary ? selection : splitSelection
+    }
+
+    var isSplit: Bool { splitSelection != nil }
+
+    func selection(for pane: Pane) -> Selection? {
+        pane == .secondary ? splitSelection : selection
+    }
+
+    func tab(for pane: Pane) -> Tab? { selection(for: pane).flatMap(tab(for:)) }
 
     func tab(for selection: Selection) -> Tab? {
         switch selection {
         case .session(let id): sessionTabs.first { $0.id == id }
         case .saved(let id): openTabs[id]
+        }
+    }
+
+    // MARK: Split View
+
+    /// Split the view, or close it. The second pane starts on the tab next
+    /// along — splitting to look at the same page twice isn't useful, and a
+    /// live web view can't be in both panes anyway.
+    func toggleSplit() {
+        guard !isSplit else { closeSplit(); return }
+        let taken = selection
+        if let other = sessionTabs.first(where: { Selection.session($0.id) != taken }) {
+            splitSelection = .session(other.id)
+        } else {
+            splitSelection = .session(newTab(select: false).id)
+        }
+        focusedPane = .secondary
+    }
+
+    func closeSplit() {
+        splitSelection = nil
+        focusedPane = .primary
+    }
+
+    /// A web view has one superview, so the same tab can't be in both panes.
+    /// Asking for the one that's already opposite means you want them swapped.
+    private func swapPanes() {
+        let primary = selection
+        selection = splitSelection
+        splitSelection = primary
+    }
+
+    /// Keep a closed or unloaded tab from leaving a pane pointing at nothing.
+    private func forget(_ gone: Selection) {
+        if splitSelection == gone { closeSplit() }
+        if selection == gone {
+            selection = splitSelection ?? sessionTabs.last.map { .session($0.id) }
+                ?? pinned.first.map { .saved($0.id) }
+            if selection == splitSelection { closeSplit() }
         }
     }
 
@@ -460,6 +527,9 @@ final class BrowserModel: ObservableObject {
         case .homePage: resolve(settings.homePageURL)
         case .duplicateCurrent: activeTab?.webView.url
         case .lastClosed: lastClosedURL.flatMap { URL(string: $0) }
+        // The overlay asks first, then opens the tab with an answer already in
+        // hand — so a tab made this way is only ever made with a URL.
+        case .addressOverlay: nil
         }
     }
 
@@ -507,7 +577,11 @@ final class BrowserModel: ObservableObject {
     // MARK: Selection
 
     func select(_ new: Selection) {
-        guard new != selection else { return }
+        guard new != currentSelection else { return }
+        // Already opposite: you can't pull it out of the other pane (one web
+        // view, one superview), so trade places instead.
+        if new == otherSelection { swapPanes(); return }
+
         if settings.autoPiP != .off, let current = activeTab { current.requestPiPIfPlaying() }
         if case .saved(let id) = new, openTabs[id] == nil, let saved = savedTab(id) {
             let tab = Tab(webView: makeWebView())
@@ -517,7 +591,8 @@ final class BrowserModel: ObservableObject {
             openTabs[id] = tab
             if let url = URL(string: saved.url) { tab.load(url) }
         }
-        selection = new
+        // A sidebar click lands in the pane you last touched.
+        if focusedPane == .secondary, isSplit { splitSelection = new } else { selection = new }
         if settings.autoPiPReturnInline { activeTab?.exitPiPIfActive() }
     }
 
@@ -532,13 +607,11 @@ final class BrowserModel: ObservableObject {
         tab.webView.stopLoading()
         tab.webView.closeAllMediaPresentations {}   // don't leak a PiP window
         sessionTabs.removeAll { $0.id == tab.id }
-        if selection == .session(tab.id) {
-            selection = sessionTabs.last.map { .session($0.id) } ?? pinned.first.map { .saved($0.id) }
-        }
+        forget(.session(tab.id))
     }
 
     func closeActive() {
-        switch selection {
+        switch currentSelection {
         case .session(let id): if let t = sessionTabs.first(where: { $0.id == id }) { close(session: t) }
         case .saved(let id): unload(savedID: id)
         case nil: break
@@ -551,7 +624,7 @@ final class BrowserModel: ObservableObject {
         openTabs[savedID]?.webView.stopLoading()
         openTabs[savedID]?.webView.closeAllMediaPresentations {}   // don't leak a PiP window
         openTabs[savedID] = nil
-        if selection == .saved(savedID) { selection = nil }
+        forget(.saved(savedID))
     }
 
     // MARK: Favorites / pinning

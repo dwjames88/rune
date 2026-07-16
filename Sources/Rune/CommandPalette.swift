@@ -2,11 +2,24 @@ import SwiftUI
 
 /// ⌘K overlay. Fuzzy-matches every command in the registry, plus browsing
 /// history and a "go / search" action — one place to do anything by keyboard.
+///
+/// ⌘T's address overlay is this, in `.newTab` mode: an address bar is already
+/// most of a palette, so it's a mode rather than a second overlay that would
+/// have to be kept in step with this one forever.
 struct CommandPalette: View {
     @ObservedObject var model: BrowserModel
     let dispatch: (Command) -> Void
     @Binding var isPresented: Bool
+    var mode: Mode = .everything
     @EnvironmentObject var appearance: AppearanceStore
+
+    enum Mode {
+        /// ⌘K: commands, history, and a go/search action.
+        case everything
+        /// ⌘T: just a destination, opened in a new tab. No commands — you asked
+        /// for an address bar, not a menu.
+        case newTab
+    }
 
     @State private var query = ""
     @State private var selection = 0
@@ -30,16 +43,25 @@ struct CommandPalette: View {
         var result: [Item] = []
         let q = query.trimmingCharacters(in: .whitespaces)
 
-        let commands = q.isEmpty
-            ? Command.allCases
-            : Command.allCases.filter { fuzzy(q, $0.title) }
-        result += commands.map(Item.command)
+        if mode == .everything {
+            let commands = q.isEmpty
+                ? Command.allCases
+                : Command.allCases.filter { fuzzy(q, $0.title) }
+            result += commands.map(Item.command)
+        }
 
         if !q.isEmpty {
             result += model.history.search(q, limit: 5).map(Item.history)
             result.append(.navigate(q))
+        } else if mode == .newTab {
+            // An empty address bar still has somewhere to go.
+            result += model.history.search("", limit: 8).map(Item.history)
         }
         return result
+    }
+
+    private var prompt: String {
+        mode == .newTab ? "Open in a new tab…" : "Type a command, address, or search…"
     }
 
     var body: some View {
@@ -49,8 +71,9 @@ struct CommandPalette: View {
 
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
-                    Image(systemName: "command").foregroundStyle(.secondary)
-                    TextField("Type a command, address, or search…", text: $query)
+                    Image(systemName: mode == .newTab ? "plus.magnifyingglass" : "command")
+                        .foregroundStyle(.secondary)
+                    TextField(prompt, text: $query)
                         .textFieldStyle(.plain)
                         .font(.title3)
                         .focused($focused)
@@ -98,11 +121,19 @@ struct CommandPalette: View {
     private func activateSelected() {
         let items = self.items
         guard items.indices.contains(selection) else { return }
+        close()
         switch items[selection] {
-        case .command(let c): close(); dispatch(c)
-        case .history(let h): close(); model.navigate(h.url)
-        case .navigate(let q): close(); model.navigate(q)
+        case .command(let c): dispatch(c)
+        case .history(let h): open(h.url)
+        case .navigate(let q): open(q)
         }
+    }
+
+    /// ⌘K navigates where you are; ⌘T was a request for a new tab.
+    private func open(_ input: String) {
+        guard mode == .newTab else { model.navigate(input); return }
+        guard let url = model.resolve(input) else { return }
+        model.newTab(url: url)
     }
 
     private func close() { isPresented = false }

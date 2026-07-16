@@ -60,45 +60,62 @@ All shipped. Kept here as the map of what landed where.
 ## Tier 2 — Flagship features of the field (aligned with Rune's ethos)
 
 0. **On-device AI** — ✅ **DONE (v1.01)**. Apple's `FoundationModels` runs every
-   AI feature by default: free, offline, and the page never leaves the Mac —
-   which for a browser is the whole argument. Claude stays as the opt-in
-   upgrade, chosen by one picker in Settings ▸ AI.
-   - `AI.swift`: an `AIProvider` protocol both models implement, and an
-     `AIService` that owns the choice and hides the difference. Every AI
-     feature is written once and runs on whatever is there.
-   - The local model streams cumulative snapshots while Claude streams deltas;
-     the local provider diffs them down so both honour one contract.
-   - `FoundationModels` is weak-linked (see `Package.swift`), so Rune still
-     launches on macOS 14/15 and simply reports no on-device model.
-   - Availability decides the UI: with neither model, every AI affordance
-     disappears rather than sitting there greyed out. No FOMO.
-   - Built first on purpose, so the Tier 3 AI features are born on the local
-     model instead of being ported to it later.
+   AI feature by default: free, offline, and the page never leaves the Mac.
+   Claude stays the opt-in upgrade, chosen by one picker in Settings ▸ AI.
+   `AI.swift` holds an `AIProvider` protocol both models implement and an
+   `AIService` that owns the choice and hides the difference — so every AI
+   feature is written once and runs on whatever is there. The framework is
+   weak-linked, so Rune still launches on macOS 14/15 with no on-device model.
+   Built first on purpose: the Tier 3 AI features are born on the local model
+   rather than ported to it.
 
-1. **Content blocking** (Vivaldi/Orion/Brave/Safari) — `WKContentRuleList`
-   with compiled EasyList + cookie-banner rules. Native, zero deps, huge
-   speed/privacy win; later a Safari-style per-page privacy report.
-2. **Split View** (Arc/Zen/Vivaldi/Dia) — two tabs side by side;
-   `WebContainer` already re-parents live views, split is a natural extension.
+1. **Content blocking** — ✅ **DONE (v1.02)**. `WKContentRuleList` compiles the
+   rules to bytecode once and enforces them in WebKit's own networking path: a
+   blocked request is never made and the page pays nothing at runtime.
+   `BlockRules` keeps the ruleset as ordinary Swift and generates WebKit's JSON
+   from it — a blob would neither diff readably nor resist mis-escaping. The
+   compiled list is cached under an identifier carrying the rule version, the
+   banner setting and the exception set, and stale compilations are swept.
+   Rules attach to the configuration every web view is built from, so private
+   windows inherit blocking free.
+   - Curated ~55 hosts, not EasyList: EasyList is ABP syntax WebKit doesn't
+     speak, and the usual converter is a dependency. **Still open:** an
+     ABP→WebKit converter, which drops in behind the same seam.
+   - Cookie walls are hidden, not answered — the markup is the page's own, so
+     there's no request to stop.
+   - **Still open:** the Safari-style per-page privacy report.
+
+2. **⌘T address bar overlay** — ⌘T brings up an address bar rather than
+   stacking a blank tab. Note: this is ~90% of the ⌘K palette already, so it
+   becomes a *mode* of that palette, not a second overlay to keep in sync.
+
+3. **Split View** — two tabs side by side. `WebContainer` already re-parents
+   live views, so the split itself is natural; the real work is that
+   `activeTab` stops being unambiguous and commands need a focused pane.
    Dia's touch: remember layouts.
-3. **Spaces/Workspaces** (Arc/Zen/Vivaldi/Dia) — named contexts with their own
-   pinned/session sets + per-space theme (Appearance presets already exist —
-   a space is a preset + a tab set).
-4. **Glance / Little Arc** (Zen/Arc) — peek a link in a floating temp web view
-   (promote to tab or dismiss). Pairs beautifully with the Claude hover
-   summary: summary → peek → tab.
-5. **Web panels** (Vivaldi) — pin any site as a narrow sidebar panel (chat,
-   music, notes).
-6. **Tab hibernation** (Vivaldi) — auto-unload background saved tabs after N
-   minutes (rows stay; `unload(savedID:)` exists); memory stays tiny.
-7. **Reader mode** (Safari/Vivaldi) — PageBridge already extracts article
-   text; render natively with Appearance typography. "Save reading to Finder"
-   for free.
-8. **Auto-archive session tabs** (Arc) — untouched session tabs older than N
-   hours close into history (setting; default off).
-9. **Per-site settings** — zoom, content-blocker exceptions, auto-PiP
-   allowlist, per-site theme override. The Settings machinery is ready.
-10. **Named sessions** (Vivaldi) — save/restore a set of tabs ("MTB research").
+
+4. **Spaces / Workspaces** — a space = an Appearance preset + its own tab sets.
+   The preset half already exists. The biggest refactor in Tier 2: it
+   restructures tabs.json, so it needs a migration and a verified round trip.
+
+5. **Glance** — peek a link in a floating temporary view, then promote it to a
+   tab or dismiss it. Chains after the hover summary: summary → peek → tab.
+
+6. **Rune Segment (Little Arc)** — a standalone window for a URL opened from
+   another app while Rune is the default browser. Like a Safari popup but
+   lighter, and the thing that makes a website feel like its own app.
+   Shares one primitive with Glance: a floating window hosting a live Tab.
+
+7. **The rest, by appetite** — web panels (pin a chat/music site in the
+   sidebar; the same "a Tab rendered somewhere else" primitive again) · tab
+   hibernation (`unload(savedID:)` already exists) · reader mode (PageBridge
+   extracts the text — but good extraction without a dependency is the one
+   place the zero-deps rule actively costs us) · auto-archive stale tabs ·
+   named sessions.
+   - **Per-site settings** — ✅ **mostly DONE (v1.02)**. `SiteSettings` is one
+     host-keyed store for zoom and blocking exceptions; the next per-site thing
+     costs a field, not a file. Auto-PiP allowlist and per-site theme are the
+     remaining candidates.
 
 ## Tier 3 — Rune-only flagships (the moat: Claude + Finder + themes)
 

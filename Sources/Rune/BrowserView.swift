@@ -8,6 +8,7 @@ struct BrowserView: View {
     let dispatch: (Command) -> Void
 
     @State private var showPalette = false
+    @State private var paletteMode = CommandPalette.Mode.everything
     @State private var showAsk = false
 
     var body: some View {
@@ -25,13 +26,23 @@ struct BrowserView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
             if showPalette {
-                CommandPalette(model: model, dispatch: dispatch, isPresented: $showPalette)
+                CommandPalette(model: model, dispatch: dispatch,
+                               isPresented: $showPalette, mode: paletteMode)
             }
         }
         .animation(.easeOut(duration: 0.15), value: showAsk)
         .font(appearance.uiFont)
         .onReceive(NotificationCenter.default.publisher(for: .showCommandPalette)) {
-            if $0.aimed(at: model) { showPalette = true }
+            guard $0.aimed(at: model) else { return }
+            paletteMode = .everything
+            showPalette = true
+        }
+        // ⌘T, when you've set it to bring up an address bar: the same overlay,
+        // asking for a destination instead of a command.
+        .onReceive(NotificationCenter.default.publisher(for: .showNewTabOverlay)) {
+            guard $0.aimed(at: model) else { return }
+            paletteMode = .newTab
+            showPalette = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .showAskBar)) {
             if $0.aimed(at: model) { showAsk = true }
@@ -648,7 +659,13 @@ private struct ContentArea: View {
             Divider()
             ZStack(alignment: .top) {
                 appearance.windowBG
-                if let tab = model.activeTab {
+                if model.isSplit {
+                    HStack(spacing: 0) {
+                        Pane(model: model, pane: .primary)
+                        Divider()
+                        Pane(model: model, pane: .secondary)
+                    }
+                } else if let tab = model.activeTab {
                     TabContent(tab: tab, model: model)
                 } else {
                     StartPage(model: model)
@@ -817,14 +834,41 @@ private struct SuggestionList: View {
     }
 }
 
+/// One side of a Split View. Marked only when it isn't the focused one — a
+/// border around the pane you're already using is noise, but knowing where the
+/// next ⌘L or ⌘W will land is not.
+private struct Pane: View {
+    @ObservedObject var model: BrowserModel
+    let pane: BrowserModel.Pane
+    @EnvironmentObject var appearance: AppearanceStore
+
+    var body: some View {
+        Group {
+            if let tab = model.tab(for: pane) {
+                TabContent(tab: tab, model: model, onClick: { model.focusedPane = pane })
+            } else {
+                StartPage(model: model)
+            }
+        }
+        .overlay {
+            if model.focusedPane != pane {
+                Rectangle().fill(.black.opacity(0.06)).allowsHitTesting(false)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { model.focusedPane = pane }
+    }
+}
+
 private struct TabContent: View {
     @ObservedObject var tab: Tab
     @ObservedObject var model: BrowserModel
+    var onClick: (() -> Void)?
     var body: some View {
         if tab.urlString.isEmpty && !tab.isLoading {
             StartPage(model: model)
         } else {
-            WebContainer(webView: tab.webView).id(tab.id)
+            WebContainer(webView: tab.webView, onClick: onClick).id(tab.id)
                 // Claude, anchored to the page: hover a link for a summary,
                 // select text for actions.
                 .overlay(alignment: .topLeading) {
