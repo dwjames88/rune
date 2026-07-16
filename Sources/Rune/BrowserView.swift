@@ -66,7 +66,7 @@ private struct Sidebar: View {
         VStack(alignment: .leading, spacing: 0) {
             Color.clear.frame(height: appearance.appearance.hideTrafficLights ? 8 : 28)
 
-            if model.isPrivate { privateBanner }
+            if model.isPrivate { privateBanner } else { SpaceBar(model: model) }
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
@@ -119,6 +119,127 @@ private struct Sidebar: View {
         .background(RoundedRectangle(cornerRadius: appearance.cornerRadius)
             .fill(appearance.accent.opacity(0.16)))
         .padding(.horizontal, 8).padding(.bottom, 6)
+    }
+}
+
+// MARK: Spaces
+
+/// The space switcher. Only earns its row once there's more than one space —
+/// a single space is just "your tabs", and a switcher for it is furniture.
+private struct SpaceBar: View {
+    @ObservedObject var model: BrowserModel
+    @EnvironmentObject var appearance: AppearanceStore
+    @State private var renaming: UUID?
+    @State private var pickingIcon: UUID?
+    @State private var pickingPreset: UUID?
+
+    var body: some View {
+        if model.spaces.count > 1 {
+            HStack(spacing: 4) {
+                ForEach(model.spaces) { space in
+                    SpaceChip(space: space, current: space.id == model.currentSpaceID)
+                        .onTapGesture { model.switchTo(space: space.id) }
+                        .contextMenu { menu(for: space) }
+                        .popover(isPresented: binding($renaming, space.id)) {
+                            RenamePopover(title: "Rename Space", name: space.name) { name in
+                                model.updateSpace(space.id) { $0.name = name }
+                                renaming = nil
+                            }
+                        }
+                        .popover(isPresented: binding($pickingIcon, space.id)) {
+                            SymbolPicker(symbol: .constant(space.icon), tint: appearance.accent) { icon in
+                                model.updateSpace(space.id) { $0.icon = icon }
+                                pickingIcon = nil
+                            }
+                        }
+                        .popover(isPresented: binding($pickingPreset, space.id)) {
+                            SpaceThemePicker(model: model, space: space) { pickingPreset = nil }
+                        }
+                }
+                Button { model.switchTo(space: model.addSpace().id) } label: {
+                    Image(systemName: "plus").font(.system(size: 10, weight: .medium))
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain).help("New Space")
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(appearance.sidebarSecondary)
+            .padding(.horizontal, 8).padding(.bottom, 6)
+        }
+    }
+
+    /// One popover state for the whole bar, keyed by which space opened it —
+    /// a per-space @State would mean a popover per chip.
+    private func binding(_ state: Binding<UUID?>, _ id: UUID) -> Binding<Bool> {
+        Binding(get: { state.wrappedValue == id }, set: { if !$0 { state.wrappedValue = nil } })
+    }
+
+    @ViewBuilder
+    private func menu(for space: Space) -> some View {
+        Button("Rename…") { renaming = space.id }
+        Button("Change Icon…") { pickingIcon = space.id }
+        Button("Theme…") { pickingPreset = space.id }
+        if model.spaces.count > 1 {
+            Divider()
+            Button("Delete Space", role: .destructive) { model.deleteSpace(space.id) }
+        }
+    }
+}
+
+private struct SpaceChip: View {
+    let space: Space
+    let current: Bool
+    @EnvironmentObject var appearance: AppearanceStore
+
+    var body: some View {
+        Image(systemName: space.icon)
+            .font(.system(size: 11))
+            .foregroundStyle(current ? appearance.accent : appearance.sidebarSecondary)
+            .frame(width: 22, height: 22)
+            .background(RoundedRectangle(cornerRadius: appearance.cornerRadius)
+                .fill(current ? appearance.selection : .clear))
+            .contentShape(Rectangle())
+            .help(space.name)
+    }
+}
+
+/// Which theme a space wears. "None" is a real answer — a space that doesn't
+/// change your theme is the default, not an omission.
+private struct SpaceThemePicker: View {
+    @ObservedObject var model: BrowserModel
+    let space: Space
+    let done: () -> Void
+    @EnvironmentObject var appearance: AppearanceStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Theme for “\(space.name)”").font(.headline)
+            Button {
+                model.updateSpace(space.id) { $0.preset = nil }
+                done()
+            } label: {
+                Label("None — keep the current theme", systemImage: space.preset == nil ? "checkmark" : "circle")
+            }
+            .buttonStyle(.plain)
+            ForEach(appearance.presets) { preset in
+                Button {
+                    model.updateSpace(space.id) { $0.preset = preset.name }
+                    done()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: space.preset == preset.name ? "checkmark" : "circle")
+                            .font(.system(size: 10)).frame(width: 12)
+                        Circle().fill(Color(hex: preset.appearance.accent) ?? .gray)
+                            .frame(width: 12, height: 12)
+                        Text(preset.name)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            Text("Switching to this space puts its theme on.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(12).frame(width: 260)
     }
 }
 

@@ -18,6 +18,21 @@ struct SavedTab: Codable, Identifiable, Equatable {
     var folderID: UUID? = nil       // pinned only; favorites can't be foldered
 }
 
+/// A space: a theme and the tabs that belong with it. Work, home, a project —
+/// each keeps its own shelf and its own look, and switching between them
+/// doesn't disturb what the other was doing.
+struct Space: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var name: String
+    var icon: String = "square.stack"
+    /// Name of the theme preset this space wears. nil = leave the theme alone,
+    /// which is what every space does until you give it one.
+    var preset: String?
+    var favorites: [SavedTab] = []
+    var pinned: [SavedTab] = []
+    var folders: [Folder] = []
+}
+
 /// The only coloured thing in the sidebar.
 struct Folder: Codable, Identifiable, Equatable {
     var id = UUID()
@@ -188,10 +203,13 @@ final class Tab: ObservableObject, Identifiable {
 
 @MainActor
 final class BrowserModel: ObservableObject {
-    // Persistent
+    // Persistent. These are the *current space's* shelf: switching spaces swaps
+    // them, which is why nothing else in the app had to learn what a space is.
     @Published var favorites: [SavedTab] = []      // max 6, no folders
     @Published var pinned: [SavedTab] = []
     @Published var folders: [Folder] = []
+    @Published var spaces: [Space] = []
+    @Published private(set) var currentSpaceID = UUID()
     // Ephemeral (this session only)
     @Published var sessionTabs: [Tab] = []
     @Published var openTabs: [UUID: Tab] = [:]     // savedID -> live tab
@@ -218,6 +236,8 @@ final class BrowserModel: ObservableObject {
     let downloads: DownloadStore
     let sites: SiteSettings
     let blocker: ContentBlocker
+    /// A space wears a theme, so the model needs to be able to put one on.
+    let appearance: AppearanceStore
 
     /// A private window: nothing it does touches the disk. Its web views share
     /// no cookies or cache with the rest of Rune, its pages never reach
@@ -226,14 +246,26 @@ final class BrowserModel: ObservableObject {
 
     private lazy var coordinator = WebCoordinator(model: self)
 
-    private struct Persisted: Codable { var favorites: [SavedTab]; var pinned: [SavedTab]; var folders: [Folder] }
+    /// tabs.json, both shapes. Before Spaces there was one unnamed shelf at the
+    /// top level; those keys stay decodable so an existing library migrates
+    /// into its first space instead of vanishing.
+    private struct Persisted: Codable {
+        var spaces: [Space]?
+        var currentSpaceID: UUID?
+        // Pre-Spaces layout.
+        var favorites: [SavedTab]?
+        var pinned: [SavedTab]?
+        var folders: [Folder]?
+    }
 
     init(settings: SettingsStore, history: HistoryStore, shortcuts: ShortcutStore,
          ai: AIService, finder: FinderStore, downloads: DownloadStore,
-         sites: SiteSettings, blocker: ContentBlocker, isPrivate: Bool = false) {
+         sites: SiteSettings, blocker: ContentBlocker, appearance: AppearanceStore,
+         isPrivate: Bool = false) {
         self.settings = settings; self.history = history; self.shortcuts = shortcuts
         self.ai = ai; self.finder = finder; self.downloads = downloads
-        self.sites = sites; self.blocker = blocker; self.isPrivate = isPrivate
+        self.sites = sites; self.blocker = blocker; self.appearance = appearance
+        self.isPrivate = isPrivate
         let config = WKWebViewConfiguration()
         config.websiteDataStore = isPrivate ? .nonPersistent() : .default()
         config.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -241,9 +273,7 @@ final class BrowserModel: ObservableObject {
         config.preferences.setValue(true, forKey: "allowsPictureInPictureMediaPlayback")
         self.configuration = config
 
-        if !isPrivate, let saved = Storage.loadJSON(Persisted.self, from: "tabs.json") {
-            favorites = saved.favorites; pinned = saved.pinned; folders = saved.folders
-        }
+        loadSpaces()
 
         // Claude's page bridge — link hovers and selections.
         config.userContentController.addUserScript(PageBridge.userScript(
@@ -291,6 +321,146 @@ final class BrowserModel: ObservableObject {
         for tab in allTabs { tab.webView.evaluateJavaScript(js) }
     }
 
+    // MARK: Spaces
+
+    /// A space's live tabs while you're somewhere else. Parked, not closed:
+    /// coming back to a space must not reload it, which is the same promise a
+    /// tab makes and the reason a space is worth having at all.
+    private struct Parked {
+        var session: [Tab] = []
+        var open: [UUID: Tab] = [:]
+        var selection: Selection?
+        var split: Selection?
+    }
+    private var parked: [UUID: Parked] = [:]
+
+    var currentSpace: Space? { spaces.first { $0.id == currentSpaceID } }
+
+    private func loadSpaces() {
+        // A private window is its own world and keeps nothing, so it gets one
+        // space that never touches disk.
+        guard !isPrivate else {
+            let only = Space(name: "Private")
+            spaces = [only]; currentSpaceID = only.id
+            return
+        }
+        let saved = Storage.loadJSON(Persisted.self, from: "tabs.json")
+        if let existing = saved?.spaces, !existing.isEmpty {
+            spaces = existing
+            currentSpaceID = saved?.currentSpaceID.flatMap { id in
+                existing.contains { $0.id == id } ? id : nil
+            } ?? existing[0].id
+        } else {
+            // Everything you had before Spaces becomes your first one.
+            let first = Space(name: "Home",
+                              favorites: saved?.favorites ?? [],
+                              pinned: saved?.pinned ?? [],
+                              folders: saved?.folders ?? [])
+            spaces = [first]
+            currentSpaceID = first.id
+        }
+        adoptCurrentSpace()
+    }
+
+    /// Bring the current space's shelf into the published arrays everything
+    /// else reads. Spaces are a swap, which is why no other code had to learn
+    /// what a space is.
+    private func adoptCurrentSpace() {
+        guard let space = currentSpace else { return }
+        favorites = space.favorites
+        pinned = space.pinned
+        folders = space.folders
+    }
+
+    /// And back the other way, before anything is written.
+    private func syncCurrentSpace() {
+        guard let i = spaces.firstIndex(where: { $0.id == currentSpaceID }) else { return }
+        spaces[i].favorites = favorites
+        spaces[i].pinned = pinned
+        spaces[i].folders = folders
+    }
+
+    func switchTo(space id: UUID) {
+        guard id != currentSpaceID, spaces.contains(where: { $0.id == id }) else { return }
+        // Park what's on screen — including which pane was showing what.
+        syncCurrentSpace()
+        parked[currentSpaceID] = Parked(session: sessionTabs, open: openTabs,
+                                        selection: selection, split: splitSelection)
+
+        currentSpaceID = id
+        let restored = parked[id] ?? Parked()
+        sessionTabs = restored.session
+        openTabs = restored.open
+        selection = restored.selection
+        splitSelection = restored.split
+        focusedPane = restored.split == nil ? .primary : focusedPane
+        adoptCurrentSpace()
+        wearPreset()
+
+        if sessionTabs.isEmpty, selection == nil { newTab() }
+        persist()
+    }
+
+    /// A space wears a theme. One without a preset leaves whatever you're
+    /// wearing alone, so this stays opt-in per space.
+    ///
+    /// A preset is the whole Appearance — which is right when you pick one
+    /// yourself in Settings, and wrong here: changing rooms shouldn't
+    /// rearrange your buttons. So a space changes how Rune *looks* and leaves
+    /// the things that are muscle memory where you put them.
+    private func wearPreset() {
+        guard let name = currentSpace?.preset,
+              let preset = appearance.presets.first(where: { $0.name == name }) else { return }
+        var next = preset.appearance
+        let current = appearance.appearance
+        next.toolbarButtons = current.toolbarButtons
+        next.compactAddressBar = current.compactAddressBar
+        next.sidebarOnRight = current.sidebarOnRight
+        next.hideTrafficLights = current.hideTrafficLights
+        appearance.appearance = next
+    }
+
+    @discardableResult
+    func addSpace(name: String = "New Space") -> Space {
+        let space = Space(name: name)
+        spaces.append(space)
+        persist()
+        return space
+    }
+
+    /// Always leaves one: a browser with no space has nowhere to put a tab.
+    func deleteSpace(_ id: UUID) {
+        guard spaces.count > 1 else { return }
+        if currentSpaceID == id, let other = spaces.first(where: { $0.id != id }) {
+            switchTo(space: other.id)
+        }
+        // Its tabs die with it — nothing parked should outlive its space.
+        if let gone = parked[id] {
+            for tab in gone.session + Array(gone.open.values) {
+                tab.webView.stopLoading()
+                tab.webView.closeAllMediaPresentations {}
+            }
+        }
+        parked[id] = nil
+        spaces.removeAll { $0.id == id }
+        persist()
+    }
+
+    func updateSpace(_ id: UUID, _ mutate: (inout Space) -> Void) {
+        guard let i = spaces.firstIndex(where: { $0.id == id }) else { return }
+        mutate(&spaces[i])
+        if id == currentSpaceID { wearPreset() }
+        persist()
+    }
+
+    func selectAdjacentSpace(_ delta: Int) {
+        guard spaces.count > 1,
+              let i = spaces.firstIndex(where: { $0.id == currentSpaceID }) else { return }
+        switchTo(space: spaces[(i + delta + spaces.count) % spaces.count].id)
+    }
+
+    // MARK: Storage
+
     /// tabs.json carries every saved favicon, so it is not a cheap write — and
     /// the things that call this arrive in bursts (dragging a folder's colour
     /// picker, reordering rows). Coalesce them; AppDelegate flushes on quit.
@@ -310,7 +480,8 @@ final class BrowserModel: ObservableObject {
     func flush() {
         saveTask?.cancel(); saveTask = nil
         guard !isPrivate else { return }
-        Storage.saveJSON(Persisted(favorites: favorites, pinned: pinned, folders: folders), to: "tabs.json")
+        syncCurrentSpace()
+        Storage.saveJSON(Persisted(spaces: spaces, currentSpaceID: currentSpaceID), to: "tabs.json")
     }
 
     // MARK: Live tab lookup

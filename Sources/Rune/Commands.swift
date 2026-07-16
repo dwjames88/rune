@@ -28,6 +28,9 @@ enum Command: String, CaseIterable, Identifiable {
     case showDownloads
     case toggleBlocking
     case toggleSplit
+    case newSpace
+    case nextSpace
+    case previousSpace
     case muteTab
     case newPrivateWindow
     case openFinder
@@ -63,6 +66,9 @@ enum Command: String, CaseIterable, Identifiable {
         case .showDownloads: "Downloads"
         case .toggleBlocking: "Block Content on This Site"
         case .toggleSplit: "Split View"
+        case .newSpace: "New Space"
+        case .nextSpace: "Next Space"
+        case .previousSpace: "Previous Space"
         case .muteTab: "Mute / Unmute Tab"
         case .newPrivateWindow: "New Private Window"
         case .openFinder: "Open Finder"
@@ -99,6 +105,9 @@ enum Command: String, CaseIterable, Identifiable {
         case .showDownloads: "arrow.down.circle"
         case .toggleBlocking: "shield"
         case .toggleSplit: "rectangle.split.2x1"
+        case .newSpace: "square.stack.badge.plus"
+        case .nextSpace: "square.stack"
+        case .previousSpace: "square.stack"
         case .muteTab: "speaker.slash"
         case .newPrivateWindow: "eyeglasses.slash"
         case .openFinder: "sparkles.rectangle.stack"
@@ -116,7 +125,7 @@ enum Command: String, CaseIterable, Identifiable {
         case .reload, .findInPage, .zoomIn, .zoomOut, .zoomReset, .muteTab, .showDownloads, .toggleBlocking, .toggleSplit,
              .toggleSidebar, .togglePiP, .commandPalette, .askPage: .view
         case .goBack, .goForward: .history
-        case .focusAddress, .nextTab, .previousTab: .navigate
+        case .focusAddress, .nextTab, .previousTab, .newSpace, .nextSpace, .previousSpace: .navigate
         case .openFinder, .saveMediaUnderCursor, .collectFromPage, .capturePage: .finder
         case .openSettings: .app
         }
@@ -148,6 +157,9 @@ enum Command: String, CaseIterable, Identifiable {
         case .showDownloads: ("l", [.command, .option])
         case .toggleBlocking: ("", [])
         case .toggleSplit: ("\\", [.command, .option])
+        case .newSpace: ("", [])
+        case .nextSpace: ("]", [.command, .control])
+        case .previousSpace: ("[", [.command, .control])
         case .muteTab: ("m", [.command, .control])
         case .newPrivateWindow: ("n", [.command, .shift])
         case .openFinder: ("f", [.command, .option])

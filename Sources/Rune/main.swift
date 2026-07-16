@@ -21,7 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     lazy var ai = AIService(claude: claude, settings: settings)
     lazy var model = BrowserModel(settings: settings, history: history, shortcuts: shortcuts,
                                   ai: ai, finder: finder, downloads: downloads,
-                                  sites: sites, blocker: blocker)
+                                  sites: sites, blocker: blocker, appearance: appearance)
     lazy var settingsWindow = SettingsWindowController(
         settings: settings, shortcuts: shortcuts, history: history, appearance: appearance,
         ai: ai, sites: sites, model: { [unowned self] in self.model })
@@ -127,7 +127,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func newPrivateWindow() {
         let privateModel = BrowserModel(settings: settings, history: history, shortcuts: shortcuts,
                                         ai: ai, finder: finder, downloads: downloads,
-                                        sites: sites, blocker: blocker, isPrivate: true)
+                                        sites: sites, blocker: blocker, appearance: appearance,
+                                        isPrivate: true)
         let window = makeBrowserWindow(for: privateModel)
         window.setContentSize(NSSize(width: 1100, height: 720))
         window.center()
@@ -357,6 +358,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .showDownloads: show(.showDownloads)
         case .toggleBlocking: model.toggleBlockingForActiveSite()
         case .toggleSplit: model.toggleSplit()
+        case .newSpace: model.switchTo(space: model.addSpace().id)
+        case .nextSpace: model.selectAdjacentSpace(1)
+        case .previousSpace: model.selectAdjacentSpace(-1)
         case .muteTab: model.activeTab?.toggleMute()
         case .newPrivateWindow: newPrivateWindow()
         case .openFinder: finderWindow.toggle()
