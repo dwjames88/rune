@@ -142,12 +142,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
               let index = browsers.firstIndex(where: { $0.window === closing }) else { return }
         let model = browsers.remove(at: index).model
         guard model.isPrivate else { return }
-        // Nothing from a private session outlives its window — including a PiP
-        // video that would otherwise keep floating over everything else.
-        for tab in model.allTabs {
-            tab.webView.stopLoading()
-            tab.webView.closeAllMediaPresentations {}
-        }
+        // Nothing from a private session outlives its window.
+        model.retireEverything()
     }
 
     // MARK: System-wide capture

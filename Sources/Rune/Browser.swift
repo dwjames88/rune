@@ -135,6 +135,15 @@ final class Tab: ObservableObject, Identifiable {
 
     func load(_ url: URL) { webView.load(URLRequest(url: url)) }
 
+    /// Done with this tab for good. Stopping the load is the obvious half; the
+    /// half that bites is the PiP window, which belongs to the system and will
+    /// happily keep floating over everything else once the tab that opened it
+    /// is gone. Every path that gets rid of a tab goes through here.
+    func retire() {
+        webView.stopLoading()
+        webView.closeAllMediaPresentations {}
+    }
+
     // MARK: Audio
 
     func toggleMute() { muted.toggle(); applyMuteToPage() }
@@ -379,18 +388,12 @@ final class BrowserModel: ObservableObject {
     /// they'd still be signed in as the wrong person.
     private func discardTabs(inSpace id: UUID) {
         if id == currentSpaceID {
-            for tab in allTabs {
-                tab.webView.stopLoading()
-                tab.webView.closeAllMediaPresentations {}
-            }
+            allTabs.forEach { $0.retire() }
             sessionTabs = []; openTabs = [:]
             selection = nil; splitSelection = nil; focusedPane = .primary
             newTab()
         } else if let gone = parked[id] {
-            for tab in gone.session + Array(gone.open.values) {
-                tab.webView.stopLoading()
-                tab.webView.closeAllMediaPresentations {}
-            }
+            (gone.session + Array(gone.open.values)).forEach { $0.retire() }
             parked[id] = nil
         }
     }
@@ -422,6 +425,15 @@ final class BrowserModel: ObservableObject {
 
     /// Every live web view this window owns.
     var allTabs: [Tab] { sessionTabs + Array(openTabs.values) }
+
+    /// Shut every tab down — the window is going away, and a parked space's
+    /// tabs shouldn't outlive it either.
+    func retireEverything() {
+        allTabs.forEach { $0.retire() }
+        for parkedSpace in parked.values {
+            (parkedSpace.session + Array(parkedSpace.open.values)).forEach { $0.retire() }
+        }
+    }
 
     /// Push changed hover settings to future pages (rebuilt user script) and to
     /// every live page (window globals the script reads at event time).
@@ -564,14 +576,8 @@ final class BrowserModel: ObservableObject {
         if currentSpaceID == id, let other = spaces.first(where: { $0.id != id }) {
             switchTo(space: other.id)
         }
-        // Its tabs die with it — nothing parked should outlive its space.
-        if let gone = parked[id] {
-            for tab in gone.session + Array(gone.open.values) {
-                tab.webView.stopLoading()
-                tab.webView.closeAllMediaPresentations {}
-            }
-        }
-        parked[id] = nil
+        // It's parked by now, and its tabs die with it.
+        discardTabs(inSpace: id)
         spaces.removeAll { $0.id == id }
         persist()
     }
@@ -591,29 +597,22 @@ final class BrowserModel: ObservableObject {
 
     // MARK: Storage
 
-    /// tabs.json carries every saved favicon, so it is not a cheap write — and
-    /// the things that call this arrive in bursts (dragging a folder's colour
-    /// picker, reordering rows). Coalesce them; AppDelegate flushes on quit.
-    /// Same bargain as history: at most a second of changes at risk on a crash.
-    private var saveTask: Task<Void, Never>?
-
-    func persist() {
-        guard !isPrivate else { return }
-        saveTask?.cancel()
-        saveTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(1))
-            guard !Task.isCancelled else { return }
-            self?.flush()
-        }
-    }
-
-    func flush() {
-        saveTask?.cancel(); saveTask = nil
-        guard !isPrivate else { return }
+    /// tabs.json carries every saved favicon, so it is not a cheap write, and
+    /// what calls this arrives in bursts (dragging a folder's colour picker,
+    /// reordering rows).
+    private lazy var writer = DebouncedWrite(after: .seconds(1)) { [weak self] in
+        guard let self, !isPrivate else { return }
         syncCurrentSpace()
         Storage.saveJSON(Persisted(spaces: spaces, profiles: profiles, currentSpaceID: currentSpaceID),
                          to: "tabs.json")
     }
+
+    func persist() {
+        guard !isPrivate else { return }
+        writer.schedule()
+    }
+
+    func flush() { writer.flush() }
 
     // MARK: Live tab lookup
 
@@ -906,8 +905,7 @@ final class BrowserModel: ObservableObject {
 
     func close(session tab: Tab) {
         rememberClosed(tab.webView.url)
-        tab.webView.stopLoading()
-        tab.webView.closeAllMediaPresentations {}   // don't leak a PiP window
+        tab.retire()
         sessionTabs.removeAll { $0.id == tab.id }
         forget(.session(tab.id))
     }
@@ -923,8 +921,7 @@ final class BrowserModel: ObservableObject {
     /// Unload a saved entry's live tab (keeps the row). Deliberately not on the
     /// undo stack — the row is still in the sidebar, so nothing was lost.
     func unload(savedID: UUID) {
-        openTabs[savedID]?.webView.stopLoading()
-        openTabs[savedID]?.webView.closeAllMediaPresentations {}   // don't leak a PiP window
+        openTabs[savedID]?.retire()
         openTabs[savedID] = nil
         forget(.saved(savedID))
     }
@@ -1132,12 +1129,6 @@ final class BrowserModel: ObservableObject {
     }
 
     // MARK: Content blocking
-
-    /// Is blocking on for the site you're looking at?
-    var blocksActiveSite: Bool {
-        guard let host = activeTab?.webView.url?.host else { return settings.blockContent }
-        return settings.blockContent && sites.blocks(host, default: true)
-    }
 
     /// "Don't block on this site". Recompiling is what applies it — exceptions
     /// live inside the rule list, so nothing is checked per request. Reloads the

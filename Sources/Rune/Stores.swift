@@ -25,6 +25,40 @@ enum Storage {
     static func remove(_ name: String) { try? FileManager.default.removeItem(at: url(name)) }
 }
 
+/// A write that waits. Nearly everything Rune keeps changes in bursts — history
+/// on every visit, zoom on every ⌘+, tabs.json on every drag of a colour picker
+/// — and none of it is worth a file write per tick. Every store wants the same
+/// bargain and used to carry its own copy of it: coalesce, and flush on quit,
+/// putting at most a second or two of changes at risk on a crash.
+@MainActor
+final class DebouncedWrite {
+    private let delay: Duration
+    private let write: () -> Void
+    private var task: Task<Void, Never>?
+
+    /// `write` should capture its store weakly — this outlives nothing, but a
+    /// store owning a writer that owns the store is a cycle for no reason.
+    init(after delay: Duration = .seconds(2), write: @escaping () -> Void) {
+        self.delay = delay
+        self.write = write
+    }
+
+    func schedule() {
+        task?.cancel()
+        task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            flush()
+        }
+    }
+
+    func flush() {
+        task?.cancel(); task = nil
+        write()
+    }
+}
+
 // MARK: - Zoom
 
 /// What ⌘+ / ⌘− / ⌘0 do to a zoom level.
@@ -126,20 +160,12 @@ final class SiteSettings: ObservableObject {
         save()
     }
 
-    // Holding ⌘+ fires a burst; coalesce it into one write.
-    private var saveTask: Task<Void, Never>?
-    private func save() {
-        saveTask?.cancel()
-        saveTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(2))
-            guard !Task.isCancelled else { return }
-            self?.flush()
-        }
-    }
-    func flush() {
-        saveTask?.cancel(); saveTask = nil
+    private lazy var writer = DebouncedWrite { [weak self] in
+        guard let self else { return }
         Storage.saveJSON(sites, to: "sites.json")
     }
+    private func save() { writer.schedule() }
+    func flush() { writer.flush() }
 }
 
 // MARK: - Search engine
@@ -399,21 +425,13 @@ final class HistoryStore: ObservableObject {
 
     func clear() { entries = []; flush() }
 
-    // Every page visit used to rewrite all of history.json; coalesce bursts of
-    // navigation into one write. AppDelegate flushes on quit.
-    private var saveTask: Task<Void, Never>?
-    private func save() {
-        saveTask?.cancel()
-        saveTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(2))
-            guard !Task.isCancelled else { return }
-            self?.flush()
-        }
-    }
-    func flush() {
-        saveTask?.cancel(); saveTask = nil
+    // Every page visit used to rewrite all of history.json.
+    private lazy var writer = DebouncedWrite { [weak self] in
+        guard let self else { return }
         Storage.saveJSON(entries, to: "history.json")
     }
+    private func save() { writer.schedule() }
+    func flush() { writer.flush() }
 }
 
 // MARK: - Shortcuts (remappable)

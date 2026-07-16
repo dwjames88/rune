@@ -102,22 +102,16 @@ final class AppearanceStore: ObservableObject {
     }
 
     // The notification (window chrome, app icon) fires immediately; the disk
-    // write is debounced so dragging a slider doesn't write a file per tick.
-    // AppDelegate flushes on quit.
-    private var saveTask: Task<Void, Never>?
-    private func persist() {
-        NotificationCenter.default.post(name: .appearanceChanged, object: nil)
-        saveTask?.cancel()
-        saveTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(1))
-            guard !Task.isCancelled else { return }
-            self?.flush()
-        }
-    }
-    func flush() {
-        saveTask?.cancel(); saveTask = nil
+    // write waits, so dragging a slider doesn't write a file per tick.
+    private lazy var writer = DebouncedWrite(after: .seconds(1)) { [weak self] in
+        guard let self else { return }
         Storage.saveJSON(appearance, to: "appearance.json")
     }
+    private func persist() {
+        NotificationCenter.default.post(name: .appearanceChanged, object: nil)
+        writer.schedule()
+    }
+    func flush() { writer.flush() }
 
     // MARK: Presets
 

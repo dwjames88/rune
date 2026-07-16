@@ -117,7 +117,7 @@ struct SpacesPane: View {
             }
             .menuStyle(.borderlessButton).frame(width: 24)
             .popover(isPresented: bind($renamingSpace, space.id)) {
-                RenameField(title: "Rename Space", name: space.name) { name in
+                RenamePopover(title: "Rename Space", name: space.name) { name in
                     model.updateSpace(space.id) { $0.name = name }
                     renamingSpace = nil
                 }
@@ -159,7 +159,7 @@ struct SpacesPane: View {
             }
             .menuStyle(.borderlessButton).frame(width: 24)
             .popover(isPresented: bind($renamingProfile, profile.id)) {
-                RenameField(title: "Rename Profile", name: profile.name) { name in
+                RenamePopover(title: "Rename Profile", name: profile.name) { name in
                     model.updateProfile(profile.id) { $0.name = name }
                     renamingProfile = nil
                 }
@@ -182,34 +182,5 @@ struct SpacesPane: View {
     /// per row would mean a popover per row.
     private func bind(_ state: Binding<UUID?>, _ id: UUID) -> Binding<Bool> {
         Binding(get: { state.wrappedValue == id }, set: { if !$0 { state.wrappedValue = nil } })
-    }
-}
-
-/// The sidebar's rename popover is private to its file; this is the same shape
-/// for Settings. Small enough that sharing it across the boundary would cost
-/// more than it saves.
-private struct RenameField: View {
-    let title: String
-    @State private var draft: String
-    let apply: (String) -> Void
-
-    init(title: String, name: String, apply: @escaping (String) -> Void) {
-        self.title = title
-        self.apply = apply
-        _draft = State(initialValue: name)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.headline)
-            TextField("Name", text: $draft)
-                .textFieldStyle(.roundedBorder).frame(width: 220)
-                .onSubmit { apply(draft) }
-            HStack {
-                Spacer()
-                Button("Save") { apply(draft) }.keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(12)
     }
 }
