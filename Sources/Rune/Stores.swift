@@ -22,6 +22,60 @@ enum Storage {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         if let data = try? encoder.encode(value) { try? data.write(to: url(name), options: .atomic) }
     }
+    static func remove(_ name: String) { try? FileManager.default.removeItem(at: url(name)) }
+}
+
+// MARK: - Zoom
+
+/// What ⌘+ / ⌘− / ⌘0 do to a zoom level.
+enum ZoomChange {
+    case larger, smaller, reset
+
+    /// The ladder ⌘+/⌘− climbs — the same stops Safari uses.
+    static let steps: [Double] = [0.5, 0.75, 0.85, 1, 1.15, 1.25, 1.5, 1.75, 2, 2.5, 3]
+
+    func applied(to level: Double) -> Double {
+        switch self {
+        case .larger: Self.steps.first { $0 > level + 0.001 } ?? Self.steps.last!
+        case .smaller: Self.steps.last { $0 < level - 0.001 } ?? Self.steps.first!
+        case .reset: 1
+        }
+    }
+}
+
+/// Page zoom per site. Keyed by host: zoom is a property of the place, not of
+/// the tab you happened to open it in.
+@MainActor
+final class ZoomStore: ObservableObject {
+    @Published private(set) var levels: [String: Double]
+
+    init() { levels = Storage.loadJSON([String: Double].self, from: "zoom.json") ?? [:] }
+
+    func level(for host: String) -> Double { levels[host] ?? 1 }
+
+    func set(_ level: Double, for host: String) {
+        // 100% is the absence of a setting, not a stored value — otherwise
+        // zoom.json fills up with every site you ever pressed ⌘0 on.
+        if abs(level - 1) < 0.001 { levels.removeValue(forKey: host) } else { levels[host] = level }
+        save()
+    }
+
+    func clear() { levels = [:]; flush() }
+
+    // Holding ⌘+ fires a burst; coalesce it into one write.
+    private var saveTask: Task<Void, Never>?
+    private func save() {
+        saveTask?.cancel()
+        saveTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            self?.flush()
+        }
+    }
+    func flush() {
+        saveTask?.cancel(); saveTask = nil
+        Storage.saveJSON(levels, to: "zoom.json")
+    }
 }
 
 // MARK: - Search engine
@@ -107,6 +161,11 @@ final class SettingsStore: ObservableObject {
     @Published var finderAutoTag: Bool { didSet { save() } }
     /// Finder batch collect: skip images smaller than this on either side.
     @Published var finderMinCollectSize: Double { didSet { save() } }
+    /// Where finished downloads land.
+    @Published var downloadLocation: DownloadLocation { didSet { save() } }
+    /// Reopen last session's tabs on launch. Off by design: session tabs are
+    /// meant to be disposable, but that should be your call, not ours.
+    @Published var restoreSession: Bool { didSet { save() } }
 
     var allEngines: [SearchEngine] { SearchEngine.presets + customEngines }
 
@@ -123,6 +182,8 @@ final class SettingsStore: ObservableObject {
         var linkHoverDelay: Double?
         var finderAutoTag: Bool?
         var finderMinCollectSize: Double?
+        var downloadLocation: DownloadLocation?
+        var restoreSession: Bool?
     }
 
     init() {
@@ -138,6 +199,8 @@ final class SettingsStore: ObservableObject {
         linkHoverDelay = saved?.linkHoverDelay ?? 0.45
         finderAutoTag = saved?.finderAutoTag ?? false
         finderMinCollectSize = saved?.finderMinCollectSize ?? 200
+        downloadLocation = saved?.downloadLocation ?? .downloadsFolder
+        restoreSession = saved?.restoreSession ?? false
     }
     private func save() {
         Storage.saveJSON(Payload(searchEngine: searchEngine, customEngines: customEngines,
@@ -145,7 +208,8 @@ final class SettingsStore: ObservableObject {
                                  newTabBehavior: newTabBehavior, homePageURL: homePageURL,
                                  newTabPlacement: newTabPlacement,
                                  linkHoverEnabled: linkHoverEnabled, linkHoverDelay: linkHoverDelay,
-                                 finderAutoTag: finderAutoTag, finderMinCollectSize: finderMinCollectSize),
+                                 finderAutoTag: finderAutoTag, finderMinCollectSize: finderMinCollectSize,
+                                 downloadLocation: downloadLocation, restoreSession: restoreSession),
                          to: "settings.json")
     }
     private func hoverChanged() {
@@ -324,4 +388,6 @@ extension Notification.Name {
     static let hoverSettingsChanged = Notification.Name("rune.hoverSettingsChanged")
     static let finderToast = Notification.Name("rune.finderToast")
     static let frontBrowserWindow = Notification.Name("rune.frontBrowserWindow")
+    static let showFindBar = Notification.Name("rune.showFindBar")
+    static let showDownloads = Notification.Name("rune.showDownloads")
 }

@@ -18,6 +18,16 @@ enum Command: String, CaseIterable, Identifiable {
     case pinTab
     case nextTab
     case previousTab
+    case findInPage
+    case undoCloseTab
+    case copyURL
+    case zoomIn
+    case zoomOut
+    case zoomReset
+    case printPage
+    case showDownloads
+    case muteTab
+    case newPrivateWindow
     case openFinder
     case saveMediaUnderCursor
     case collectFromPage
@@ -41,6 +51,16 @@ enum Command: String, CaseIterable, Identifiable {
         case .pinTab: "Pin / Unpin Tab"
         case .nextTab: "Next Tab"
         case .previousTab: "Previous Tab"
+        case .findInPage: "Find in Page…"
+        case .undoCloseTab: "Undo Close Tab"
+        case .copyURL: "Copy Page URL"
+        case .zoomIn: "Zoom In"
+        case .zoomOut: "Zoom Out"
+        case .zoomReset: "Actual Size"
+        case .printPage: "Print…"
+        case .showDownloads: "Downloads"
+        case .muteTab: "Mute / Unmute Tab"
+        case .newPrivateWindow: "New Private Window"
         case .openFinder: "Open Finder"
         case .saveMediaUnderCursor: "Save Image Under Cursor"
         case .collectFromPage: "Collect Images from Page…"
@@ -65,6 +85,16 @@ enum Command: String, CaseIterable, Identifiable {
         case .pinTab: "pin"
         case .nextTab: "arrow.right.to.line"
         case .previousTab: "arrow.left.to.line"
+        case .findInPage: "text.magnifyingglass"
+        case .undoCloseTab: "arrow.uturn.backward.square"
+        case .copyURL: "link"
+        case .zoomIn: "plus.magnifyingglass"
+        case .zoomOut: "minus.magnifyingglass"
+        case .zoomReset: "1.magnifyingglass"
+        case .printPage: "printer"
+        case .showDownloads: "arrow.down.circle"
+        case .muteTab: "speaker.slash"
+        case .newPrivateWindow: "eyeglasses.slash"
         case .openFinder: "sparkles.rectangle.stack"
         case .saveMediaUnderCursor: "photo.badge.arrow.down"
         case .collectFromPage: "square.grid.3x3.square"
@@ -76,8 +106,9 @@ enum Command: String, CaseIterable, Identifiable {
     /// Which menu section it belongs under.
     var menu: MenuSection {
         switch self {
-        case .newTab, .closeTab, .pinTab: .file
-        case .reload, .toggleSidebar, .togglePiP, .commandPalette, .askPage: .view
+        case .newTab, .closeTab, .undoCloseTab, .newPrivateWindow, .copyURL, .printPage, .pinTab: .file
+        case .reload, .findInPage, .zoomIn, .zoomOut, .zoomReset, .muteTab, .showDownloads,
+             .toggleSidebar, .togglePiP, .commandPalette, .askPage: .view
         case .goBack, .goForward: .history
         case .focusAddress, .nextTab, .previousTab: .navigate
         case .openFinder, .saveMediaUnderCursor, .collectFromPage, .capturePage: .finder
@@ -101,6 +132,16 @@ enum Command: String, CaseIterable, Identifiable {
         case .pinTab: ("d", .command)
         case .nextTab: ("]", [.command, .shift])
         case .previousTab: ("[", [.command, .shift])
+        case .findInPage: ("f", .command)
+        case .undoCloseTab: ("t", [.command, .shift])
+        case .copyURL: ("c", [.command, .shift])
+        case .zoomIn: ("=", .command)
+        case .zoomOut: ("-", .command)
+        case .zoomReset: ("0", .command)
+        case .printPage: ("p", .command)
+        case .showDownloads: ("l", [.command, .option])
+        case .muteTab: ("m", [.command, .control])
+        case .newPrivateWindow: ("n", [.command, .shift])
         case .openFinder: ("f", [.command, .option])
         case .saveMediaUnderCursor: ("s", .option)
         case .collectFromPage: ("s", [.command, .shift])

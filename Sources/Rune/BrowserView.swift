@@ -30,8 +30,12 @@ struct BrowserView: View {
         }
         .animation(.easeOut(duration: 0.15), value: showAsk)
         .font(appearance.uiFont)
-        .onReceive(NotificationCenter.default.publisher(for: .showCommandPalette)) { _ in showPalette = true }
-        .onReceive(NotificationCenter.default.publisher(for: .showAskBar)) { _ in showAsk = true }
+        .onReceive(NotificationCenter.default.publisher(for: .showCommandPalette)) {
+            if $0.aimed(at: model) { showPalette = true }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showAskBar)) {
+            if $0.aimed(at: model) { showAsk = true }
+        }
     }
 
     private var sidebar: some View {
@@ -50,6 +54,8 @@ private struct Sidebar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Color.clear.frame(height: appearance.appearance.hideTrafficLights ? 8 : 28)
+
+            if model.isPrivate { privateBanner }
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
@@ -84,6 +90,24 @@ private struct Sidebar: View {
         }
         .background(appearance.sidebarBG)
         .foregroundStyle(appearance.sidebarText)
+    }
+
+    /// Says plainly what this window is and what it doesn't keep. A private
+    /// window has no favorites and no pinned rows, so there's room for it.
+    private var privateBanner: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "eyeglasses").font(.system(size: 11))
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Private").font(appearance.font(12, weight: .semibold))
+                Text("No history, no cookies kept.").font(appearance.font(10))
+                    .foregroundStyle(appearance.sidebarSecondary)
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: appearance.cornerRadius)
+            .fill(appearance.accent.opacity(0.16)))
+        .padding(.horizontal, 8).padding(.bottom, 6)
     }
 }
 
@@ -131,15 +155,14 @@ private struct FaviconTile: View {
     @EnvironmentObject var appearance: AppearanceStore
 
     var body: some View {
-        Favicon(png: saved.faviconPNG, name: saved.name, color: saved.colorHex, size: 20)
+        Favicon(png: saved.faviconPNG, name: saved.name, size: 20)
             .frame(width: 34, height: 34)
             .background(RoundedRectangle(cornerRadius: appearance.cornerRadius)
                 .fill(selected ? appearance.selection : appearance.hover))
             .overlay(RoundedRectangle(cornerRadius: appearance.cornerRadius)
-                .strokeBorder(selected ? tint : .clear, lineWidth: 1.5))
+                .strokeBorder(selected ? appearance.accent : .clear, lineWidth: 1.5))
             .help(saved.name)
     }
-    private var tint: Color { saved.colorHex.flatMap(Color.init(hex:)) ?? appearance.accent }
 }
 
 // MARK: Pinned (+ folders)
@@ -182,21 +205,25 @@ private struct FolderView: View {
     @EnvironmentObject var appearance: AppearanceStore
     @State private var targeted = false
     @State private var pickingIcon = false
+    @State private var pickingColor = false
     @State private var renaming = false
-    @State private var draftName = ""
+
+    /// A folder is the one thing in the sidebar that carries a colour; without
+    /// one it simply wears the appearance accent.
+    private var tint: Color { folder.colorHex.flatMap(Color.init(hex:)) ?? appearance.accent }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
                 Image(systemName: folder.collapsed ? "chevron.right" : "chevron.down")
                     .font(.system(size: 9)).foregroundStyle(appearance.sidebarSecondary).frame(width: 10)
-                Image(systemName: folder.icon).font(.system(size: 11)).foregroundStyle(appearance.accent)
+                Image(systemName: folder.icon).font(.system(size: 11)).foregroundStyle(tint)
                 Text(folder.name).font(appearance.font(12, weight: .medium))
                 Spacer()
             }
             .padding(.horizontal, 8).padding(.vertical, 5)
             .background(RoundedRectangle(cornerRadius: appearance.cornerRadius)
-                .fill(targeted ? appearance.accent.opacity(0.22) : .clear))
+                .fill(targeted ? tint.opacity(0.22) : .clear))
             .contentShape(Rectangle())
             .onTapGesture { model.toggleFolder(folder.id) }
             .dropDestination(for: TabDrag.self) { items, _ in
@@ -204,23 +231,26 @@ private struct FolderView: View {
                 model.handleDrop(drag, to: .pinned(folderID: folder.id, index: nil)); return true
             } isTargeted: { targeted = $0 }
             .contextMenu {
-                Button("Rename…") { draftName = folder.name; renaming = true }
+                Button("Rename…") { renaming = true }
                 Button("Change Icon…") { pickingIcon = true }
+                Button("Change Color…") { pickingColor = true }
                 Divider()
                 Button("Delete Folder", role: .destructive) { model.deleteFolder(folder.id) }
             }
             .popover(isPresented: $pickingIcon) {
-                SymbolPicker(symbol: .constant(folder.icon), tint: appearance.accent) { icon in
+                SymbolPicker(symbol: .constant(folder.icon), tint: tint) { icon in
                     model.setFolderIcon(folder.id, icon); pickingIcon = false
                 }
             }
+            .popover(isPresented: $pickingColor) {
+                FolderColorPopover(current: tint, hasColor: folder.colorHex != nil) { hex in
+                    model.setFolderColor(folder.id, hex)
+                }
+            }
             .popover(isPresented: $renaming) {
-                HStack {
-                    TextField("Folder name", text: $draftName)
-                        .textFieldStyle(.roundedBorder).frame(width: 180)
-                        .onSubmit { model.renameFolder(folder.id, to: draftName); renaming = false }
-                    Button("Save") { model.renameFolder(folder.id, to: draftName); renaming = false }
-                }.padding(10)
+                RenamePopover(title: "Rename Folder", name: folder.name) {
+                    model.renameFolder(folder.id, to: $0); renaming = false
+                }
             }
 
             if !folder.collapsed {
@@ -265,14 +295,15 @@ private struct SavedRow: View {
     let origin: TabDrag.Origin
     let dropIndex: Int
     let folderID: UUID?
-    @EnvironmentObject var appearance: AppearanceStore
     @State private var hovering = false
-    @State private var customizing = false
+    @State private var renaming = false
 
     var body: some View {
-        RowBody(icon: { Favicon(png: saved.faviconPNG, name: saved.name, color: saved.colorHex, size: 15) },
-                name: saved.name, colorHex: saved.colorHex,
-                selected: model.selection == .saved(saved.id), hovering: hovering) { EmptyView() }
+        RowBody(icon: { Favicon(png: saved.faviconPNG, name: saved.name, size: 15) },
+                name: saved.name,
+                selected: model.selection == .saved(saved.id), hovering: hovering) {
+            if let live = model.openTabs[saved.id] { AudioBadge(tab: live) }
+        }
             .onTapGesture { model.select(.saved(saved.id)) }
             .onHover { hovering = $0 }
             .draggable(TabDrag(id: saved.id, origin: origin))
@@ -282,11 +313,12 @@ private struct SavedRow: View {
             }
             .contextMenu {
                 TabMenu(model: model, selection: .saved(saved.id), isFavorite: origin == .favorite,
-                        customize: { customizing = true })
+                        rename: { renaming = true })
             }
-            .popover(isPresented: $customizing) {
-                CustomizePopover(model: model, selection: .saved(saved.id),
-                                 name: saved.name, colorHex: saved.colorHex)
+            .popover(isPresented: $renaming) {
+                RenamePopover(title: "Rename Tab", name: saved.name) {
+                    model.setName($0, for: .saved(saved.id)); renaming = false
+                }
             }
     }
 }
@@ -297,13 +329,14 @@ private struct SessionRow: View {
     let dropIndex: Int
     @EnvironmentObject var appearance: AppearanceStore
     @State private var hovering = false
-    @State private var customizing = false
+    @State private var renaming = false
 
     var body: some View {
-        RowBody(icon: { Favicon(image: tab.favicon, name: tab.displayName, color: tab.colorHex,
+        RowBody(icon: { Favicon(image: tab.favicon, name: tab.displayName,
                                 size: 15, loading: tab.isLoading) },
-                name: tab.displayName, colorHex: tab.colorHex,
+                name: tab.displayName,
                 selected: model.selection == .session(tab.id), hovering: hovering) {
+            AudioBadge(tab: tab)
             if hovering {
                 Button { model.close(session: tab) } label: {
                     Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
@@ -321,44 +354,58 @@ private struct SessionRow: View {
         }
         .contextMenu {
             TabMenu(model: model, selection: .session(tab.id), isFavorite: false,
-                    customize: { customizing = true })
+                    rename: { renaming = true })
         }
-        .popover(isPresented: $customizing) {
-            CustomizePopover(model: model, selection: .session(tab.id),
-                             name: tab.displayName, colorHex: tab.colorHex)
+        .popover(isPresented: $renaming) {
+            RenamePopover(title: "Rename Tab", name: tab.displayName) {
+                model.setName($0, for: .session(tab.id)); renaming = false
+            }
         }
     }
 }
 
+/// A tab row: favicon, name, trailing affordances. Selection reads as one fill
+/// — a tab carries no colour of its own, so there is no dot and no edge bar.
 private struct RowBody<Icon: View, Trailing: View>: View {
     @ViewBuilder var icon: () -> Icon
     let name: String
-    let colorHex: String?
     let selected: Bool
     let hovering: Bool
     @ViewBuilder var trailing: () -> Trailing
     @EnvironmentObject var appearance: AppearanceStore
-
-    private var tint: Color? { colorHex.flatMap(Color.init(hex:)) }
 
     var body: some View {
         HStack(spacing: 8) {
             icon()
             Text(name).lineLimit(1).font(appearance.font(13))
             Spacer(minLength: 4)
-            if let tint { Circle().fill(tint).frame(width: 7, height: 7) }
             trailing()
         }
         .padding(.horizontal, 8).frame(height: 30)
         .background(RoundedRectangle(cornerRadius: appearance.cornerRadius)
-            .fill(selected ? (tint?.opacity(0.22) ?? appearance.selection)
-                           : (hovering ? appearance.hover : .clear)))
-        .overlay(alignment: .leading) {
-            if selected, let tint {
-                RoundedRectangle(cornerRadius: 2).fill(tint).frame(width: 3, height: 16).padding(.leading, 2)
-            }
-        }
+            .fill(selected ? appearance.selection : (hovering ? appearance.hover : .clear)))
         .contentShape(Rectangle())
+    }
+}
+
+/// Speaker badge on a row that is making noise (or has been silenced). Its own
+/// view so it can observe the live Tab — the rows around it observe the model.
+private struct AudioBadge: View {
+    @ObservedObject var tab: Tab
+    @EnvironmentObject var appearance: AppearanceStore
+
+    var body: some View {
+        if tab.isPlayingAudio || tab.muted {
+            Button { tab.toggleMute() } label: {
+                Image(systemName: tab.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(appearance.sidebarSecondary)
+                    .frame(width: 14, height: 14)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(tab.muted ? "Unmute this tab" : "Mute this tab")
+        }
     }
 }
 
@@ -382,7 +429,6 @@ struct Favicon: View {
     var png: Data? = nil
     var image: NSImage? = nil
     let name: String
-    var color: String? = nil
     let size: CGFloat
     var loading = false
 
@@ -397,7 +443,7 @@ struct Favicon: View {
                     .clipShape(RoundedRectangle(cornerRadius: 3))
             } else {
                 RoundedRectangle(cornerRadius: 4)
-                    .fill((color.flatMap(Color.init(hex:)) ?? .secondary).opacity(0.85))
+                    .fill(Color.secondary.opacity(0.85))
                     .overlay(Text(String(name.first ?? "•").uppercased())
                         .font(.system(size: size * 0.6, weight: .semibold)).foregroundStyle(.white))
             }
@@ -420,50 +466,103 @@ private struct SectionHeader: View {
     }
 }
 
-// MARK: - Customize (full color + rename)
+// MARK: - Escape
 
-private struct CustomizePopover: View {
-    @ObservedObject var model: BrowserModel
-    let selection: Selection
-    @State private var draftName: String
+/// Escape, reliably. Every overlay Rune puts up — the palette, the find bar,
+/// the ask bar — holds focus in a text field, and a focused field takes Escape
+/// as `cancelOperation` and stops there: it quietly drops focus and nothing
+/// downstream runs. So `onKeyPress(.escape)` never fires precisely when it's
+/// wanted, whether it's attached to the field or to an ancestor. Watching the
+/// key itself is what actually works.
+private struct DismissOnEscape: ViewModifier {
+    let action: () -> Void
+    /// `Any?` is what NSEvent's monitor API hands back and takes.
+    @State private var monitor: Any?
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear {
+                guard monitor == nil else { return }
+                monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                    guard event.keyCode == 53 else { return event }
+                    action()
+                    return nil   // swallow it, so the field doesn't also cancel
+                }
+            }
+            .onDisappear {
+                if let monitor { NSEvent.removeMonitor(monitor) }
+                monitor = nil
+            }
+    }
+}
+
+extension View {
+    /// Close this overlay on Escape. Only listens while it's on screen.
+    func dismissOnEscape(perform action: @escaping () -> Void) -> some View {
+        modifier(DismissOnEscape(action: action))
+    }
+}
+
+// MARK: - Folder colour
+
+/// Colour is a folder's only decoration, so it gets one small picker: a live
+/// swatch plus a way back to the appearance accent.
+private struct FolderColorPopover: View {
     @State private var color: Color
     @State private var hasColor: Bool
-    @EnvironmentObject var appearance: AppearanceStore
+    let apply: (String?) -> Void
 
-    init(model: BrowserModel, selection: Selection, name: String, colorHex: String?) {
-        self.model = model
-        self.selection = selection
-        _draftName = State(initialValue: name)
-        _color = State(initialValue: colorHex.flatMap(Color.init(hex:)) ?? .accentColor)
-        _hasColor = State(initialValue: colorHex != nil)
+    init(current: Color, hasColor: Bool, apply: @escaping (String?) -> Void) {
+        _color = State(initialValue: current)
+        _hasColor = State(initialValue: hasColor)
+        self.apply = apply
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Customize Tab").font(.headline)
+            Text("Folder Color").font(.headline)
             HStack {
-                Text("Name")
-                TextField("Tab name", text: $draftName)
-                    .textFieldStyle(.roundedBorder).frame(width: 190)
-                    .onSubmit(apply)
+                ColorPicker("Color", selection: $color, supportsOpacity: false)
+                    .disabled(!hasColor)
+                    .onChange(of: color) { if hasColor { apply(color.hex) } }
             }
-            HStack {
-                Toggle("Color", isOn: $hasColor)
-                Spacer()
-                ColorPicker("", selection: $color, supportsOpacity: false)
-                    .labelsHidden().disabled(!hasColor)
-            }
-            HStack {
-                Spacer()
-                Button("Apply", action: apply).keyboardShortcut(.defaultAction)
-            }
+            Toggle("Use the accent color", isOn: Binding(
+                get: { !hasColor },
+                set: { useAccent in
+                    hasColor = !useAccent
+                    apply(useAccent ? nil : color.hex)
+                }))
         }
-        .padding(12).frame(width: 280)
+        .padding(12).frame(width: 230)
+    }
+}
+
+// MARK: - Rename
+
+/// One rename popover for everything in the sidebar — tabs and folders alike.
+private struct RenamePopover: View {
+    let title: String
+    @State private var draft: String
+    let apply: (String) -> Void
+
+    init(title: String, name: String, apply: @escaping (String) -> Void) {
+        self.title = title
+        self.apply = apply
+        _draft = State(initialValue: name)
     }
 
-    private func apply() {
-        model.setName(draftName, for: selection)
-        model.setColor(hasColor ? color.hex : nil, for: selection)
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).font(.headline)
+            TextField("Name", text: $draft)
+                .textFieldStyle(.roundedBorder).frame(width: 220)
+                .onSubmit { apply(draft) }
+            HStack {
+                Spacer()
+                Button("Save") { apply(draft) }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(12)
     }
 }
 
@@ -473,10 +572,16 @@ private struct TabMenu: View {
     @ObservedObject var model: BrowserModel
     let selection: Selection
     let isFavorite: Bool
-    var customize: (() -> Void)? = nil
+    var rename: (() -> Void)? = nil
 
     var body: some View {
-        if let customize { Button("Customize…", action: customize) }
+        if let rename { Button("Rename…", action: rename) }
+        if let url = model.url(for: selection) {
+            Button("Copy Link") { model.copy(url) }
+        }
+        if let live = model.tab(for: selection), live.isPlayingAudio || live.muted {
+            Button(live.muted ? "Unmute Tab" : "Mute Tab") { live.toggleMute() }
+        }
         Divider()
         if case .session(let id) = selection, let tab = model.sessionTabs.first(where: { $0.id == id }) {
             Button("Pin") { model.pin(tab) }
@@ -513,6 +618,8 @@ private struct ContentArea: View {
     @State private var suggestions: [Suggestion] = []
     @State private var toast: String?
     @State private var toastDismiss: Task<Void, Never>?
+    @State private var showFind = false
+    @State private var showDownloads = false
 
     private func updateSuggestions() {
         guard addressFocused, !address.trimmingCharacters(in: .whitespaces).isEmpty else {
@@ -536,7 +643,8 @@ private struct ContentArea: View {
     var body: some View {
         VStack(spacing: 0) {
             Toolbar(model: model, dispatch: dispatch, address: $address, addressFocused: $addressFocused,
-                    highlighted: $highlighted, suggestionCount: suggestions.count, activate: activate)
+                    highlighted: $highlighted, suggestionCount: suggestions.count,
+                    showDownloads: $showDownloads, activate: activate)
             Divider()
             ZStack(alignment: .top) {
                 appearance.windowBG
@@ -544,6 +652,18 @@ private struct ContentArea: View {
                     TabContent(tab: tab, model: model)
                 } else {
                     StartPage(model: model)
+                }
+                if showFind {
+                    FindBar(model: model, isPresented: $showFind)
+                        .padding(.top, 8).padding(.trailing, 12)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+                if showDownloads {
+                    DownloadsPanel(downloads: model.downloads, showing: $showDownloads)
+                        .padding(.top, 8).padding(.trailing, 12)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
                 if let candidates = model.collectCandidates {
                     CollectSheet(model: model, candidates: candidates)
@@ -570,6 +690,23 @@ private struct ContentArea: View {
             }
         }
         .animation(.easeOut(duration: 0.18), value: toast)
+        .animation(.easeOut(duration: 0.15), value: showFind)
+        .animation(.easeOut(duration: 0.15), value: showDownloads)
+        // Both panels hang off the same corner, so only one is ever up — and
+        // opening the list is what counts as having seen it, however you opened
+        // it (the toolbar button or ⌥⌘L).
+        .onChange(of: showDownloads) {
+            guard showDownloads else { return }
+            showFind = false
+            model.downloads.hasUnseen = false
+        }
+        .onChange(of: showFind) { if showFind { showDownloads = false } }
+        .onReceive(NotificationCenter.default.publisher(for: .showFindBar)) {
+            if $0.aimed(at: model) { showFind = true }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showDownloads)) {
+            if $0.aimed(at: model) { showDownloads.toggle() }
+        }
         .onChange(of: model.selection) { sync() }
         // Live URL updates from the active tab: ContentArea doesn't observe the
         // Tab object, so navigations that never touch the toolbar (start-page
@@ -578,7 +715,9 @@ private struct ContentArea: View {
         .onChange(of: address) { updateSuggestions() }
         .onChange(of: addressFocused) { updateSuggestions() }
         .onAppear { sync() }
-        .onReceive(NotificationCenter.default.publisher(for: .focusAddressBar)) { _ in addressFocused = true }
+        .onReceive(NotificationCenter.default.publisher(for: .focusAddressBar)) {
+            if $0.aimed(at: model) { addressFocused = true }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .finderToast)) { note in
             toast = note.object as? String
             toastDismiss?.cancel()
@@ -770,7 +909,9 @@ private struct StartPage: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity).background(appearance.startPageBG)
         .onAppear { focused = true }
-        .onReceive(NotificationCenter.default.publisher(for: .focusStartPage)) { _ in focused = true }
+        .onReceive(NotificationCenter.default.publisher(for: .focusStartPage)) {
+            if $0.aimed(at: model) { focused = true }
+        }
     }
 }
 
@@ -812,6 +953,7 @@ private struct Toolbar: View {
     var addressFocused: FocusState<Bool>.Binding
     @Binding var highlighted: Int
     let suggestionCount: Int
+    @Binding var showDownloads: Bool
     let activate: () -> Void
     @EnvironmentObject var appearance: AppearanceStore
 
@@ -874,18 +1016,25 @@ private struct Toolbar: View {
         .foregroundStyle(appearance.chromeText)
     }
 
-    /// Any command renders as a toolbar button; navigation commands keep their
-    /// live state (disabled arrows, reload-becomes-stop).
+    /// Any command renders as a toolbar button; a few keep live state (disabled
+    /// arrows, reload-becomes-stop, download progress).
+    @ViewBuilder
     private func commandButton(_ command: Command) -> some View {
-        var symbol = command.icon
-        var disabled = false
         switch command {
-        case .goBack: disabled = !(model.activeTab?.canGoBack ?? false)
-        case .goForward: disabled = !(model.activeTab?.canGoForward ?? false)
-        case .reload: if model.activeTab?.isLoading == true { symbol = "xmark" }
-        default: break
+        case .showDownloads:
+            DownloadsButton(downloads: model.downloads, showing: $showDownloads)
+        case .goBack:
+            button(command.icon) { dispatch(command) }
+                .disabled(!(model.activeTab?.canGoBack ?? false)).help(command.title)
+        case .goForward:
+            button(command.icon) { dispatch(command) }
+                .disabled(!(model.activeTab?.canGoForward ?? false)).help(command.title)
+        case .reload:
+            button(model.activeTab?.isLoading == true ? "xmark" : command.icon) { dispatch(command) }
+                .help(command.title)
+        default:
+            button(command.icon) { dispatch(command) }.help(command.title)
         }
-        return button(symbol) { dispatch(command) }.disabled(disabled).help(command.title)
     }
 
     private func button(_ symbol: String, action: @escaping () -> Void) -> some View {

@@ -200,7 +200,7 @@ struct AskBar: View {
         .shadow(color: .black.opacity(0.22), radius: 24, y: 8)
         .padding(.top, 12)
         .onAppear { focused = true }
-        .onKeyPress(.escape) { close(); return .handled }
+        .dismissOnEscape { close() }
     }
 
     private func close() { isPresented = false; answer = ""; error = nil; question = "" }

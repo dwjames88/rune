@@ -8,36 +8,42 @@ app.setActivationPolicy(.regular)
 app.run()
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let settings = SettingsStore()
     let history = HistoryStore()
     let shortcuts = ShortcutStore()
     let appearance = AppearanceStore()
     let claude = ClaudeService()
     let finder = FinderStore()
+    let downloads = DownloadStore()
+    let zoomLevels = ZoomStore()
     lazy var model = BrowserModel(settings: settings, history: history, shortcuts: shortcuts,
-                                  claude: claude, finder: finder)
+                                  claude: claude, finder: finder, downloads: downloads,
+                                  zoomLevels: zoomLevels)
     lazy var settingsWindow = SettingsWindowController(
-        settings: settings, shortcuts: shortcuts, history: history, appearance: appearance, claude: claude)
+        settings: settings, shortcuts: shortcuts, history: history, appearance: appearance,
+        claude: claude, zoomLevels: zoomLevels, model: { [unowned self] in self.model })
     lazy var finderWindow = FinderWindowController(model: model, appearance: appearance)
     private var window: NSWindow?
+
+    /// Every browser window and the model behind it — the main one, plus any
+    /// private windows. Stays small, so a linear lookup is the right tool.
+    private var browsers: [(window: NSWindow, model: BrowserModel)] = []
+
+    /// Commands act on the browser window you're actually looking at, which is
+    /// what makes a private window feel like its own browser rather than a
+    /// second view onto the main one.
+    private var frontModel: BrowserModel {
+        if let key = NSApp.keyWindow, let hit = browsers.first(where: { $0.window === key }) {
+            return hit.model
+        }
+        return model
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildMenu()
 
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-            backing: .buffered, defer: false)
-        window.title = "Rune"
-        window.titlebarAppearsTransparent = true
-        window.titleVisibility = .hidden
-        let hosting = NSHostingController(
-            rootView: BrowserView(model: model, dispatch: { [weak self] in self?.dispatch($0) })
-                .environmentObject(appearance))
-        hosting.sizingOptions = []   // never let SwiftUI shrink the window to its ideal size
-        window.contentViewController = hosting
-        window.minSize = NSSize(width: 900, height: 600)
+        let window = makeBrowserWindow(for: model)
         // Reopen at the last size/position; first launch gets a generous default.
         // Clamp to minSize — frames autosaved by older builds could be tiny.
         if window.setFrameUsingName("RuneMainWindow") {
@@ -57,7 +63,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyWindowChrome()
 
         NSApp.activate(ignoringOtherApps: true)
-        model.newTab()
+        // Restoring is opt-in; without it, or with nothing to restore, you get
+        // the usual empty tab.
+        if !model.restoreSession() { model.newTab() }
 
         if ProcessInfo.processInfo.environment["RUNE_OPEN_SETTINGS"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { self.settingsWindow.show() }
@@ -77,9 +85,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        model.persist()
+        model.flush()
+        model.persistSession()
         history.flush()
         appearance.flush()
+        zoomLevels.flush()
+    }
+
+    // MARK: Browser windows
+
+    /// The main window and every private window are the same thing built around
+    /// a different model.
+    private func makeBrowserWindow(for browserModel: BrowserModel) -> NSWindow {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered, defer: false)
+        window.title = browserModel.isPrivate ? "Private" : "Rune"
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        let hosting = NSHostingController(
+            rootView: BrowserView(model: browserModel, dispatch: { [weak self] in self?.dispatch($0) })
+                .environmentObject(appearance))
+        hosting.sizingOptions = []   // never let SwiftUI shrink the window to its ideal size
+        window.contentViewController = hosting
+        window.minSize = NSSize(width: 900, height: 600)
+        window.delegate = self
+        // A window built this way releases itself on close, which under ARC is
+        // one release too many once `browsers` holds it too — closing a private
+        // window would take the whole app down with it.
+        window.isReleasedWhenClosed = false
+        browsers.append((window, browserModel))
+        return window
+    }
+
+    /// A window that leaves nothing behind: its own ephemeral data store, no
+    /// history, no saved tabs, no undo stack. Closing it ends that session for
+    /// good.
+    private func newPrivateWindow() {
+        let privateModel = BrowserModel(settings: settings, history: history, shortcuts: shortcuts,
+                                        claude: claude, finder: finder, downloads: downloads,
+                                        zoomLevels: zoomLevels, isPrivate: true)
+        let window = makeBrowserWindow(for: privateModel)
+        window.setContentSize(NSSize(width: 1100, height: 720))
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        applyWindowChrome()
+        privateModel.newTab()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard let closing = notification.object as? NSWindow,
+              let index = browsers.firstIndex(where: { $0.window === closing }) else { return }
+        let model = browsers.remove(at: index).model
+        guard model.isPrivate else { return }
+        // Nothing from a private session outlives its window — including a PiP
+        // video that would otherwise keep floating over everything else.
+        for tab in model.allTabs {
+            tab.webView.stopLoading()
+            tab.webView.closeAllMediaPresentations {}
+        }
     }
 
     // MARK: System-wide capture
@@ -180,8 +245,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func applyWindowChrome() {
         let hidden = appearance.appearance.hideTrafficLights
-        for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
-            window?.standardWindowButton(kind)?.isHidden = hidden
+        for browser in browsers {
+            for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+                browser.window.standardWindowButton(kind)?.isHidden = hidden
+            }
         }
         // Custom app icon (nil = back to the bundle's Icon Composer icon).
         // Rendering is 1024px — only redo it when the icon tokens changed, not
@@ -253,13 +320,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func dispatch(_ command: Command) {
         // Commands that act on the browser should be seen acting: invoked from
         // the Finder window, ⌘K/⌘T/⌘L would otherwise work invisibly behind it.
-        let worksAnywhere: Set<Command> = [.openFinder, .openSettings, .closeTab]
+        let worksAnywhere: Set<Command> = [.openFinder, .openSettings, .closeTab, .newPrivateWindow]
         if finderWindow.isKey, !worksAnywhere.contains(command) {
             window?.makeKeyAndOrderFront(nil)
         }
+        let model = frontModel
+        // Overlays live inside a BrowserView, so they're asked for by
+        // broadcast; naming the model keeps a second window out of it.
+        func show(_ name: Notification.Name) {
+            NotificationCenter.default.post(name: name, object: model)
+        }
         switch command {
-        case .commandPalette: NotificationCenter.default.post(name: .showCommandPalette, object: nil)
-        case .askPage: NotificationCenter.default.post(name: .showAskBar, object: nil)
+        case .commandPalette: show(.showCommandPalette)
+        case .askPage: show(.showAskBar)
         case .newTab: model.newTab()
         case .closeTab:
             // ⌘W closes the window you're looking at, not a hidden tab.
@@ -267,9 +340,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .reload: model.reload()
         case .goBack: model.goBack()
         case .goForward: model.goForward()
-        case .focusAddress: NotificationCenter.default.post(name: .focusAddressBar, object: nil)
+        case .focusAddress: show(.focusAddressBar)
         case .toggleSidebar: model.sidebarVisible.toggle()
         case .togglePiP: model.activeTab?.togglePiP()
+        case .findInPage: show(.showFindBar)
+        case .undoCloseTab: model.undoCloseTab()
+        case .copyURL: model.copyURL()
+        case .zoomIn: model.zoom(.larger)
+        case .zoomOut: model.zoom(.smaller)
+        case .zoomReset: model.zoom(.reset)
+        case .printPage: model.printPage()
+        case .showDownloads: show(.showDownloads)
+        case .muteTab: model.activeTab?.toggleMute()
+        case .newPrivateWindow: newPrivateWindow()
         case .openFinder: finderWindow.toggle()
         case .saveMediaUnderCursor: model.saveMediaUnderCursor()
         case .collectFromPage: model.collectFromPage()

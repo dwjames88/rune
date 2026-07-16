@@ -100,6 +100,35 @@ enum PageBridge {
         const m = mediaInfo(e.target);
         post({ type: 'contextTarget', src: m ? m.src : null, kind: m ? m.kind : null });
       }, true);
+
+      // Audio state + mute. WKWebView has no public per-tab mute, so the media
+      // elements are silenced directly. Media events don't bubble, but a
+      // capture listener on document still sees every one of them — including
+      // elements added later — so this needs no observer and no polling, and
+      // costs nothing on a page that never plays anything.
+      let muted = false;
+      const mediaEls = () => [...document.querySelectorAll('video,audio')];
+      const audible = () => mediaEls().some(m => !m.paused && !m.ended && !m.muted && m.volume > 0);
+      let wasAudible = false;
+      const reportAudio = () => {
+        const now = audible();
+        if (now !== wasAudible) { wasAudible = now; post({ type: 'audio', playing: now }); }
+      };
+
+      document.addEventListener('play', (e) => {
+        // Anything that starts playing into a muted tab starts muted.
+        if (muted && e.target && 'muted' in e.target) e.target.muted = true;
+        reportAudio();
+      }, true);
+      for (const ev of ['pause', 'ended', 'volumechange', 'emptied']) {
+        document.addEventListener(ev, reportAudio, true);
+      }
+
+      window.__runeMute = (on) => {
+        muted = on;
+        for (const m of mediaEls()) m.muted = on;
+        reportAudio();
+      };
     })();
     """ }
 

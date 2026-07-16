@@ -26,7 +26,7 @@ struct Appearance: Codable, Equatable {
     // Toolbar
     /// Command rawValues shown as toolbar buttons, in order, before the
     /// address bar. Any command works — the button dispatches it.
-    var toolbarButtons: [String] = ["toggleSidebar", "goBack", "goForward", "reload"]
+    var toolbarButtons: [String] = ["toggleSidebar", "goBack", "goForward", "reload", "showDownloads"]
     /// Show just the site's host in the address bar until you click it.
     var compactAddressBar = true
 

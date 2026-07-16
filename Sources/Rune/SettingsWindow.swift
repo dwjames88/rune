@@ -10,11 +10,16 @@ final class SettingsWindowController {
     let history: HistoryStore
     let appearance: AppearanceStore
     let claude: ClaudeService
+    let zoomLevels: ZoomStore
+    /// Resolved lazily: the browser model is built after this controller.
+    let model: () -> BrowserModel
 
     init(settings: SettingsStore, shortcuts: ShortcutStore, history: HistoryStore,
-         appearance: AppearanceStore, claude: ClaudeService) {
+         appearance: AppearanceStore, claude: ClaudeService, zoomLevels: ZoomStore,
+         model: @escaping () -> BrowserModel) {
         self.settings = settings; self.shortcuts = shortcuts; self.history = history
         self.appearance = appearance; self.claude = claude
+        self.zoomLevels = zoomLevels; self.model = model
     }
 
     func show() {
@@ -26,7 +31,7 @@ final class SettingsWindowController {
             w.center(); w.setFrameAutosaveName("RuneSettings"); w.isReleasedWhenClosed = false
             w.contentViewController = NSHostingController(rootView: RuneSettingsView(
                 settings: settings, shortcuts: shortcuts, history: history,
-                appearance: appearance, claude: claude))
+                appearance: appearance, claude: claude, zoomLevels: zoomLevels, model: model))
             window = w
         }
         window?.makeKeyAndOrderFront(nil)
@@ -40,6 +45,8 @@ private struct RuneSettingsView: View {
     @ObservedObject var history: HistoryStore
     @ObservedObject var appearance: AppearanceStore
     @ObservedObject var claude: ClaudeService
+    @ObservedObject var zoomLevels: ZoomStore
+    let model: () -> BrowserModel
 
     enum Tab: String, CaseIterable { case appearance = "Appearance", presets = "Presets", browsing = "Browsing", claude = "Claude", shortcuts = "Shortcuts" }
     @State private var tab: Tab = .appearance
@@ -54,7 +61,8 @@ private struct RuneSettingsView: View {
             switch tab {
             case .appearance: AppearancePane(appearance: appearance)
             case .presets: PresetsPane(appearance: appearance)
-            case .browsing: BrowsingPane(settings: settings, history: history)
+            case .browsing: BrowsingPane(settings: settings, history: history,
+                                         zoomLevels: zoomLevels, model: model)
             case .claude: ClaudePane(claude: claude, settings: settings)
             case .shortcuts: ShortcutsPane(shortcuts: shortcuts)
             }
@@ -288,6 +296,12 @@ private struct PresetsPane: View {
 private struct BrowsingPane: View {
     @ObservedObject var settings: SettingsStore
     @ObservedObject var history: HistoryStore
+    @ObservedObject var zoomLevels: ZoomStore
+    let model: () -> BrowserModel
+
+    @State private var importing = false
+    @State private var importResult: String?
+
     var body: some View {
         Form {
             Section("Search") {
@@ -310,6 +324,56 @@ private struct BrowsingPane: View {
                 Text("New Tabs")
             } footer: {
                 Text("⌘T never stacks empty tabs — if a start page is already open, it's focused instead.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                Toggle("Reopen last session's tabs on launch", isOn: $settings.restoreSession)
+            } header: {
+                Text("Session")
+            } footer: {
+                Text("Off by default: session tabs are meant to be disposable. Pinned tabs and favorites always come back either way.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                Picker("Save downloads to", selection: $settings.downloadLocation) {
+                    ForEach(DownloadLocation.allCases) { Text($0.label).tag($0) }
+                }
+            } header: {
+                Text("Downloads")
+            } footer: {
+                Text("⌥⌘L lists what you've fetched this launch. Turn “\(Command.showDownloads.title)” on under Appearance ▸ Toolbar for a button with live progress.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                LabeledContent("Zoomed sites") {
+                    HStack {
+                        Text("\(zoomLevels.levels.count)").foregroundStyle(.secondary)
+                        Button("Reset All") { zoomLevels.clear() }
+                            .disabled(zoomLevels.levels.isEmpty)
+                    }
+                }
+            } header: {
+                Text("Zoom")
+            } footer: {
+                Text("⌘+ and ⌘− set the zoom for the whole site, remembered for next time. ⌘0 forgets it again.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                HStack {
+                    ForEach(BookmarkImport.Source.allCases) { source in
+                        Button("Import from \(source.label)") { runImport(source) }
+                            .disabled(importing)
+                    }
+                    if importing { ProgressView().controlSize(.small) }
+                    Spacer()
+                }
+                if let importResult {
+                    Text(importResult).font(.caption).foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Bookmarks")
+            } footer: {
+                Text("Bookmarks land in your pinned shelf, keeping their folders. Anything you already have is skipped, so importing twice is safe.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
@@ -342,11 +406,29 @@ private struct BrowsingPane: View {
                     HStack { Text("\(history.entries.count) entries").foregroundStyle(.secondary)
                         Button("Clear") { history.clear() } }
                 }
-                Text("You stay signed in across launches — cookies and site data persist automatically.")
+                Text("You stay signed in across launches — cookies and site data persist automatically. A private window (⇧⌘N) keeps none of it.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
+    }
+
+    private func runImport(_ source: BookmarkImport.Source) {
+        importing = true
+        importResult = nil
+        Task {
+            defer { importing = false }
+            do {
+                let added = model().importBookmarks(try await BookmarkImport.load(from: source))
+                importResult = added == 0
+                    ? "Nothing new — those \(source.label) bookmarks are already pinned."
+                    : "Added \(added) bookmark\(added == 1 ? "" : "s") from \(source.label)."
+            } catch BookmarkImport.Failure.cancelled {
+                importResult = nil
+            } catch {
+                importResult = error.localizedDescription
+            }
+        }
     }
 }
 

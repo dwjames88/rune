@@ -86,7 +86,7 @@ struct CommandPalette: View {
         .onAppear { focused = true }
         .onKeyPress(.downArrow) { move(1); return .handled }
         .onKeyPress(.upArrow) { move(-1); return .handled }
-        .onKeyPress(.escape) { close(); return .handled }
+        .dismissOnEscape { close() }
     }
 
     private func move(_ delta: Int) {
