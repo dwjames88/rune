@@ -18,6 +18,22 @@ struct SavedTab: Codable, Identifiable, Equatable {
     var folderID: UUID? = nil       // pinned only; favorites can't be foldered
 }
 
+/// A profile: who you're signed in as. Its own cookies, its own logins, its own
+/// storage — two profiles can hold two accounts on the same site without either
+/// knowing about the other.
+///
+/// A space is a *view*; a profile is an *identity*. Spaces belong to profiles,
+/// which is why the work space and the personal space can both open the same
+/// site and see different inboxes.
+struct Profile: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var name: String
+    var icon: String = "person.crop.circle"
+    /// The first profile inherits the store Rune has always used, so the
+    /// arrival of profiles doesn't sign anybody out of anything.
+    var usesDefaultStore = false
+}
+
 /// A space: a theme and the tabs that belong with it. Work, home, a project —
 /// each keeps its own shelf and its own look, and switching between them
 /// doesn't disturb what the other was doing.
@@ -28,6 +44,10 @@ struct Space: Codable, Identifiable, Equatable {
     /// Name of the theme preset this space wears. nil = leave the theme alone,
     /// which is what every space does until you give it one.
     var preset: String?
+    /// Whose cookies this space browses with. Optional on purpose: spaces
+    /// written before profiles existed have no such key, and a required one
+    /// would fail to decode — taking the whole shelf down with it.
+    var profileID: UUID?
     var favorites: [SavedTab] = []
     var pinned: [SavedTab] = []
     var folders: [Folder] = []
@@ -209,6 +229,7 @@ final class BrowserModel: ObservableObject {
     @Published var pinned: [SavedTab] = []
     @Published var folders: [Folder] = []
     @Published var spaces: [Space] = []
+    @Published var profiles: [Profile] = []
     @Published private(set) var currentSpaceID = UUID()
     // Ephemeral (this session only)
     @Published var sessionTabs: [Tab] = []
@@ -226,7 +247,6 @@ final class BrowserModel: ObservableObject {
 
     static let maxFavorites = 6
 
-    let configuration: WKWebViewConfiguration
     let settings: SettingsStore
     let history: HistoryStore
     let shortcuts: ShortcutStore
@@ -251,6 +271,7 @@ final class BrowserModel: ObservableObject {
     /// into its first space instead of vanishing.
     private struct Persisted: Codable {
         var spaces: [Space]?
+        var profiles: [Profile]?
         var currentSpaceID: UUID?
         // Pre-Spaces layout.
         var favorites: [SavedTab]?
@@ -266,19 +287,8 @@ final class BrowserModel: ObservableObject {
         self.ai = ai; self.finder = finder; self.downloads = downloads
         self.sites = sites; self.blocker = blocker; self.appearance = appearance
         self.isPrivate = isPrivate
-        let config = WKWebViewConfiguration()
-        config.websiteDataStore = isPrivate ? .nonPersistent() : .default()
-        config.defaultWebpagePreferences.allowsContentJavaScript = true
-        config.preferences.isElementFullscreenEnabled = true
-        config.preferences.setValue(true, forKey: "allowsPictureInPictureMediaPlayback")
-        self.configuration = config
 
         loadSpaces()
-
-        // Claude's page bridge — link hovers and selections.
-        config.userContentController.addUserScript(PageBridge.userScript(
-            hoverDelayMs: Int(settings.linkHoverDelay * 1000), hoverEnabled: settings.linkHoverEnabled))
-        config.userContentController.add(coordinator, name: PageBridge.handlerName)
 
         hoverObserver = NotificationCenter.default.addObserver(
             forName: .hoverSettingsChanged, object: nil, queue: .main) { [weak self] _ in
@@ -297,12 +307,115 @@ final class BrowserModel: ObservableObject {
     private var hoverObserver: (any NSObjectProtocol)?
     private var blockingObserver: (any NSObjectProtocol)?
 
+    // MARK: Profiles
+
+    /// One configuration per profile, built on first use and kept: a profile is
+    /// its cookie jar, and the jar is chosen when a web view is built. Two
+    /// spaces on different profiles can hold two accounts on the same site
+    /// without either knowing about the other.
+    private var configurations: [UUID: WKWebViewConfiguration] = [:]
+
+    /// The profile the current space browses as.
+    var currentProfileID: UUID { currentSpace?.profileID ?? defaultProfileID }
+
+    var defaultProfileID: UUID { profiles.first?.id ?? UUID() }
+
+    func profile(_ id: UUID?) -> Profile? { profiles.first { $0.id == id } }
+
+    var configuration: WKWebViewConfiguration { configuration(for: currentProfileID) }
+
+    func configuration(for profileID: UUID) -> WKWebViewConfiguration {
+        if let existing = configurations[profileID] { return existing }
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = dataStore(for: profileID)
+        config.defaultWebpagePreferences.allowsContentJavaScript = true
+        config.preferences.isElementFullscreenEnabled = true
+        config.preferences.setValue(true, forKey: "allowsPictureInPictureMediaPlayback")
+        // Claude's page bridge — link hovers and selections.
+        config.userContentController.addUserScript(PageBridge.userScript(
+            hoverDelayMs: Int(settings.linkHoverDelay * 1000), hoverEnabled: settings.linkHoverEnabled))
+        config.userContentController.add(coordinator, name: PageBridge.handlerName)
+        blocker.apply(to: config.userContentController)
+        configurations[profileID] = config
+        return config
+    }
+
+    private func dataStore(for profileID: UUID) -> WKWebsiteDataStore {
+        // A private window is its own jar and keeps nothing, profiles or not.
+        if isPrivate { return .nonPersistent() }
+        // The first profile inherits the store Rune has always used, so the
+        // arrival of profiles signs nobody out of anything.
+        guard let profile = profile(profileID), !profile.usesDefaultStore else { return .default() }
+        return WKWebsiteDataStore(forIdentifier: profileID)
+    }
+
+    @discardableResult
+    func addProfile(name: String = "New Profile") -> Profile {
+        let profile = Profile(name: name)
+        profiles.append(profile)
+        persist()
+        return profile
+    }
+
+    /// Deleting a profile takes its cookies with it — that's what being a
+    /// separate identity means — so its spaces move somewhere rather than being
+    /// orphaned, and their tabs go with the jar they were built on.
+    func deleteProfile(_ id: UUID) {
+        guard profiles.count > 1, let fallback = profiles.first(where: { $0.id != id }) else { return }
+        for i in spaces.indices where spaces[i].profileID == id {
+            spaces[i].profileID = fallback.id
+            discardTabs(inSpace: spaces[i].id)
+        }
+        profiles.removeAll { $0.id == id }
+        configurations[id] = nil
+        WKWebsiteDataStore.remove(forIdentifier: id) { error in
+            if let error { NSLog("Rune: couldn't remove profile store — %@", error.localizedDescription) }
+        }
+        persist()
+    }
+
+    /// Drop a space's live tabs, wherever they are. A web view is bound to the
+    /// jar it was built with, so a space that changes hands can't keep them —
+    /// they'd still be signed in as the wrong person.
+    private func discardTabs(inSpace id: UUID) {
+        if id == currentSpaceID {
+            for tab in allTabs {
+                tab.webView.stopLoading()
+                tab.webView.closeAllMediaPresentations {}
+            }
+            sessionTabs = []; openTabs = [:]
+            selection = nil; splitSelection = nil; focusedPane = .primary
+            newTab()
+        } else if let gone = parked[id] {
+            for tab in gone.session + Array(gone.open.values) {
+                tab.webView.stopLoading()
+                tab.webView.closeAllMediaPresentations {}
+            }
+            parked[id] = nil
+        }
+    }
+
+    func updateProfile(_ id: UUID, _ mutate: (inout Profile) -> Void) {
+        guard let i = profiles.firstIndex(where: { $0.id == id }) else { return }
+        mutate(&profiles[i])
+        persist()
+    }
+
+    /// Move a space to another profile.
+    func setProfile(_ profileID: UUID, for spaceID: UUID) {
+        guard let i = spaces.firstIndex(where: { $0.id == spaceID }),
+              spaces[i].profileID != profileID else { return }
+        spaces[i].profileID = profileID
+        discardTabs(inSpace: spaceID)
+        persist()
+    }
+
     /// Recompile if the rules changed, then hand them to the configuration and
     /// to every page already open.
     func reloadBlocking() {
         Task { @MainActor in
             await blocker.reload()
-            blocker.apply(to: configuration.userContentController)
+            for config in configurations.values { blocker.apply(to: config.userContentController) }
             for tab in allTabs { blocker.apply(to: tab.webView.configuration.userContentController) }
         }
     }
@@ -313,9 +426,11 @@ final class BrowserModel: ObservableObject {
     /// Push changed hover settings to future pages (rebuilt user script) and to
     /// every live page (window globals the script reads at event time).
     private func applyHoverSettings() {
-        configuration.userContentController.removeAllUserScripts()
-        configuration.userContentController.addUserScript(PageBridge.userScript(
-            hoverDelayMs: Int(settings.linkHoverDelay * 1000), hoverEnabled: settings.linkHoverEnabled))
+        for config in configurations.values {
+            config.userContentController.removeAllUserScripts()
+            config.userContentController.addUserScript(PageBridge.userScript(
+                hoverDelayMs: Int(settings.linkHoverDelay * 1000), hoverEnabled: settings.linkHoverEnabled))
+        }
         let js = "window.__runeHoverMs = \(Int(settings.linkHoverDelay * 1000));"
             + "window.__runeHoverOff = \(settings.linkHoverEnabled ? "false" : "true");"
         for tab in allTabs { tab.webView.evaluateJavaScript(js) }
@@ -340,11 +455,21 @@ final class BrowserModel: ObservableObject {
         // A private window is its own world and keeps nothing, so it gets one
         // space that never touches disk.
         guard !isPrivate else {
-            let only = Space(name: "Private")
-            spaces = [only]; currentSpaceID = only.id
+            let onlyProfile = Profile(name: "Private")
+            let only = Space(name: "Private", profileID: onlyProfile.id)
+            profiles = [onlyProfile]; spaces = [only]; currentSpaceID = only.id
             return
         }
         let saved = Storage.loadJSON(Persisted.self, from: "tabs.json")
+
+        // Whatever Rune was before, one profile owns it — and it keeps the
+        // store that's always been there, so nobody is signed out by this.
+        if let existing = saved?.profiles, !existing.isEmpty {
+            profiles = existing
+        } else {
+            profiles = [Profile(name: "Personal", usesDefaultStore: true)]
+        }
+
         if let existing = saved?.spaces, !existing.isEmpty {
             spaces = existing
             currentSpaceID = saved?.currentSpaceID.flatMap { id in
@@ -358,6 +483,11 @@ final class BrowserModel: ObservableObject {
                               folders: saved?.folders ?? [])
             spaces = [first]
             currentSpaceID = first.id
+        }
+        // Spaces written before profiles existed have no owner; give them the
+        // first one rather than leaving them pointing nowhere.
+        for i in spaces.indices where spaces[i].profileID == nil || profile(spaces[i].profileID) == nil {
+            spaces[i].profileID = profiles[0].id
         }
         adoptCurrentSpace()
     }
@@ -422,7 +552,7 @@ final class BrowserModel: ObservableObject {
 
     @discardableResult
     func addSpace(name: String = "New Space") -> Space {
-        let space = Space(name: name)
+        let space = Space(name: name, profileID: currentProfileID)
         spaces.append(space)
         persist()
         return space
@@ -481,7 +611,8 @@ final class BrowserModel: ObservableObject {
         saveTask?.cancel(); saveTask = nil
         guard !isPrivate else { return }
         syncCurrentSpace()
-        Storage.saveJSON(Persisted(spaces: spaces, currentSpaceID: currentSpaceID), to: "tabs.json")
+        Storage.saveJSON(Persisted(spaces: spaces, profiles: profiles, currentSpaceID: currentSpaceID),
+                         to: "tabs.json")
     }
 
     // MARK: Live tab lookup

@@ -48,7 +48,7 @@ private struct RuneSettingsView: View {
     @ObservedObject var sites: SiteSettings
     let model: () -> BrowserModel
 
-    enum Tab: String, CaseIterable { case appearance = "Appearance", presets = "Presets", browsing = "Browsing", ai = "AI", shortcuts = "Shortcuts" }
+    enum Tab: String, CaseIterable { case appearance = "Appearance", presets = "Presets", spaces = "Spaces", browsing = "Browsing", ai = "AI", shortcuts = "Shortcuts" }
     @State private var tab: Tab = .appearance
 
     var body: some View {
@@ -61,6 +61,7 @@ private struct RuneSettingsView: View {
             switch tab {
             case .appearance: AppearancePane(appearance: appearance)
             case .presets: PresetsPane(appearance: appearance)
+            case .spaces: SpacesPane(model: model(), appearance: appearance)
             case .browsing: BrowsingPane(settings: settings, history: history,
                                          sites: sites, model: model)
             case .ai: AIPane(ai: ai, settings: settings)
