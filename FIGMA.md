@@ -59,10 +59,12 @@ Fonts: system (SF Pro); Paper preset uses Georgia.
 
 | Component | Spec (from code) |
 |---|---|
-| **Favicon** | 15×15 (row) / 20×20 (tile) / 24×24 (start page); image radius 3; fallback = rounded-rect 4, letter 60% size semibold white on tab-color |
+| **Favicon** | 15×15 (row) / 20×20 (tile) / 24×24 (start page); image radius 3; fallback = rounded-rect 4, letter 60% size semibold white on secondary |
 | **Toolbar button** | 26×24 hit area, SF Symbol 13pt medium, textSecondary. Variants: sidebar.left, chevron.left, chevron.right, arrow.clockwise, xmark (loading), pip, plus.square — any `Command.icon` |
-| **Color dot** | 7×7 circle, tab custom color |
-| **Selection bar** | 3×16, radius 2, tab tint (leading edge of selected row) |
+| **Downloads button** | 26×24, arrow.down.circle 13pt. While fetching: accent ring (2pt, round cap, −90° start) trimmed to progress, 18×18. Unseen-finished: 5×5 accent dot, top-trailing, offset (−3, 3) |
+| **Audio badge** | speaker.wave.2.fill / speaker.slash.fill (muted), 9pt, textSecondary, 14×14 hit area |
+| ~~**Color dot**~~ | **Removed** — tabs carry no colour; a favicon identifies a tab |
+| ~~**Selection bar**~~ | **Removed** — selection is one flat fill, no edge bar |
 | **Section header** | text 11 semibold, textSecondary, h-pad 8; optional trailing text 10 |
 | **Star** (Finder, future) | SF star/star.fill 0–5 |
 
@@ -70,8 +72,9 @@ Fonts: system (SF Pro); Paper preset uses Georgia.
 
 | Component | Spec |
 |---|---|
-| **Tab row** (`RowBody`) | h 30, h-pad 8, spacing 8, radius = cornerRadius. Layers: Favicon 15 · name (fontSize 13, 1 line) · spacer · color dot · trailing (close xmark 9 bold in 3-pad hover circle). Variants: default / hovering (hover fill) / selected (selection fill or tint@22% + selection bar) / session-with-close |
-| **Favicon tile** (favorites) | 34×34, radius = cornerRadius, hover fill; selected = selection fill + 1.5 stroke in tint/accent; Favicon 20 centered |
+| **Tab row** (`RowBody`) | h 30, h-pad 8, spacing 8, radius = cornerRadius. Layers: Favicon 15 · name (fontSize 13, 1 line) · spacer · trailing (audio badge, then close xmark 9 bold in 3-pad hover circle). Variants: default / hovering (hover fill) / selected (selection fill) / session-with-close. **No colour dot, no selection bar** — a tab has no colour of its own |
+| **Folder row** | chevron 9 (right/down) 10 wide · icon 11 in folder colour (or accent) · name 12 medium · h-pad 8 v-pad 5, radius = cornerRadius; drop-targeted = folder colour @22%. Folders are the only coloured thing in the sidebar |
+| **Favicon tile** (favorites) | 34×34, radius = cornerRadius, hover fill; selected = selection fill + 1.5 accent stroke; Favicon 20 centered |
 | **Address bar** | auto-layout h-pad 10 v-pad 6, radius = cornerRadius, fill = background, stroke hairline (focused: accent). Leading magnifyingglass 11. Variants: compact (host only, e.g. "pinkbike.com") / full URL / placeholder "Search or enter address" |
 | **Suggestion row** | h-pad 10 v-pad 7 radius 6; icon 16 wide + title + trailing URL (11, max 260, right); highlighted = accent fill, white text. Icon variants: arrow.up.forward / magnifyingglass / clock / sparkles |
 | **Start tile** | 52×52 radius cornerRadius+2 chrome fill + hairline stroke, favicon 24; label 11 secondary below, max-w 64, spacing 6 |

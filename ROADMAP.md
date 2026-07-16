@@ -11,28 +11,38 @@ toolbar · compact address bar · custom search engines · ambient AI (hover
 summaries, ⌘J, selection actions, AI address bar) · Finder inspiration library
 with system-wide capture.
 
-## Tier 1 — Fundamentals Rune is missing (table stakes everywhere)
+## Tier 1 — Fundamentals ✅ DONE (2026-07-16)
 
-1. **Downloads** — nothing handles downloads today. `WKDownloadDelegate`,
-   progress in toolbar, toast on finish, "reveal" action; optional "save
-   downloads into Finder library" twist.
-2. **Find in Page (⌘F)** — native `webView.find(_:)` + a small overlay bar
-   (match count, next/prev). Command-registry entry.
-3. **Undo Close Tab (⇧⌘T)** — `lastClosedURL` is already tracked; near-free.
-4. **⌘-click → background tab** — and popup policy; `adoptPopup` currently
-   always foregrounds.
-5. **Page zoom (⌘+/−/0)** — `webView.pageZoom`, persisted per host.
-6. **Session restore** — setting: reopen last session's tabs (deliberately not
-   persisted today; make it a choice).
-7. **Private window** — `WKWebsiteDataStore.nonPersistent()`, second window,
-   distinct appearance tint.
-8. **Print / Save as PDF (⌘P)** — `webView.printOperation` / `createPDF`.
-9. **Bookmark import** — read Safari/Chrome bookmark files into Pinned/folders
-   (one-time migration sheet in Settings).
-10. **Mute tab + audio indicator** — JS media enumeration via PageBridge;
-    speaker badge on the tab row.
-11. **Apple Passwords / AutoFill** — already committed; needs paid Developer
-    Program (same unlock as notarization for sharing builds).
+All shipped. Kept here as the map of what landed where.
+
+1. **Downloads** — `Downloads.swift`: `WKDownloadDelegate` on `WebCoordinator`,
+   `DownloadStore` aggregating progress, toolbar ring + panel (⌥⌘L), toast on
+   finish, reveal/open. Destination is a setting: Downloads folder / ask each
+   time / straight into the Finder library.
+2. **Find in Page (⌘F)** — `FindBar.swift`, native `webView.find(_:)`. No match
+   count: `WKFindResult` only reports whether it hit, and counting would mean
+   walking the DOM per keystroke. The field turns red instead.
+3. **Undo Close Tab (⇧⌘T)** — `closedURLs` stack (25 deep). Unloading a pinned
+   tab deliberately doesn't stack: its row never left the sidebar.
+4. **⌘-click → background tab** — `decidePolicyFor navigationAction`, plus the
+   same rule for popups. ⇧⌘-click foregrounds.
+5. **Page zoom (⌘+/−/0)** — `ZoomStore`, keyed by host, applied on commit.
+   100% is stored as absence, so `zoom.json` only holds real choices.
+6. **Session restore** — setting, off by default. Only URLs are kept.
+7. **Private window (⇧⌘N)** — `BrowserModel(isPrivate:)` with a
+   `nonPersistent()` store: no history, no persist, no undo stack, no saved
+   tabs. Commands aim at the front window's model.
+8. **Print / Save as PDF (⌘P)** — `webView.printOperation`; "Save as PDF" is in
+   the system panel, so one command covers both.
+9. **Bookmark import** — `BookmarkImport.swift`, Safari plist + Chrome JSON.
+   Safari's file is behind Full Disk Access; an open panel is the fallback ask.
+10. **Mute tab + audio indicator** — PageBridge capture listeners (no observer,
+    no polling) + `window.__runeMute`; speaker badge on the row.
+11. **No coloured tabs** — colour belongs to folders now. The tab colour dot and
+    selection bar are gone; `Folder.colorHex` replaces `SavedTab.colorHex`.
+
+**Deferred:** Apple Passwords / AutoFill — needs the paid Developer Program
+(same unlock as notarization for sharing builds).
 
 ## Tier 2 — Flagship features of the field (aligned with Rune's ethos)
 
@@ -79,12 +89,15 @@ with system-wide capture.
 
 ## Suggested build order
 
-`1.1 Downloads → 1.2 Find in Page → 1.3/1.4/1.5 (small, same session) →
-2.1 Content blocking → 2.2 Split View → 1.6/1.7 → 2.3 Spaces → 3.1 Catch-up
-brief → 2.4 Glance → rest by appetite.`
+Tier 1 is done. From here:
 
-Rationale: downloads + find are the two gaps users hit within minutes;
-content blocking is the single biggest daily-experience upgrade WebKit gives
-us for free; split view + spaces are the flagship pair every modern browser
-converged on; then the Claude/Finder moat features nobody else can copy
-cheaply.
+`2.1 Content blocking → 2.2 ⌘T address overlay → 2.3 Split View → 2.4 Spaces →
+2.5 FoundationModels → 3.1 Catch-up brief → 2.6 Glance / Segment → rest by
+appetite.`
+
+Rationale: content blocking is the single biggest daily-experience upgrade
+WebKit gives us for free; split view + spaces are the flagship pair every
+modern browser converged on, and both want the same window-model work;
+FoundationModels before the Tier 3 AI features so they're built on the local
+model from the start rather than ported to it; then the Claude/Finder moat
+nobody else can copy cheaply.
