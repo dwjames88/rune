@@ -4,8 +4,12 @@ import Security
 /// Minimal Anthropic Messages API client over raw HTTP (no SDK exists for Swift,
 /// and zero dependencies is a project rule). The API key lives in the macOS
 /// Keychain — it is never written to Rune's JSON settings.
+///
+/// One of two `AIProvider`s. Nothing in the app talks to this directly any
+/// more; it goes through `AIService`, which decides whether Claude or the local
+/// model answers.
 @MainActor
-final class ClaudeService: ObservableObject {
+final class ClaudeService: ObservableObject, AIProvider {
     static let model = "claude-sonnet-5"
     private static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
 
@@ -38,12 +42,12 @@ final class ClaudeService: ObservableObject {
     /// Thinking is disabled here: Sonnet 5 runs adaptive thinking by default, which
     /// is too slow for ambient UI like a hover popover.
     func complete(system: String, user: String, maxTokens: Int = 400,
-                  effort: String = "low") async throws -> String {
+                  effort: AIEffort = .low) async throws -> String {
         let req = try request(body: [
             "max_tokens": maxTokens,
             "system": system,
             "thinking": ["type": "disabled"],
-            "output_config": ["effort": effort],
+            "output_config": ["effort": effort.rawValue],
             "messages": [["role": "user", "content": user]],
         ], stream: false)
 
@@ -66,7 +70,7 @@ final class ClaudeService: ObservableObject {
 
     /// Streaming completion — used by the Ask bar so answers appear as they're written.
     func stream(system: String, user: String, maxTokens: Int = 1024,
-                effort: String = "medium") -> AsyncThrowingStream<String, Error> {
+                effort: AIEffort = .medium) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             Task {
                 do {
@@ -74,7 +78,7 @@ final class ClaudeService: ObservableObject {
                         "max_tokens": maxTokens,
                         "system": system,
                         "thinking": ["type": "disabled"],
-                        "output_config": ["effort": effort],
+                        "output_config": ["effort": effort.rawValue],
                         "messages": [["role": "user", "content": user]],
                     ], stream: true)
 

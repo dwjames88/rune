@@ -161,6 +161,9 @@ final class SettingsStore: ObservableObject {
     @Published var finderAutoTag: Bool { didSet { save() } }
     /// Finder batch collect: skip images smaller than this on either side.
     @Published var finderMinCollectSize: Double { didSet { save() } }
+    /// Which model runs Rune's AI. On-device by default — free, private and
+    /// offline; Claude is the upgrade you opt into.
+    @Published var aiModel: AIModel { didSet { save() } }
     /// Where finished downloads land.
     @Published var downloadLocation: DownloadLocation { didSet { save() } }
     /// Reopen last session's tabs on launch. Off by design: session tabs are
@@ -184,6 +187,7 @@ final class SettingsStore: ObservableObject {
         var finderMinCollectSize: Double?
         var downloadLocation: DownloadLocation?
         var restoreSession: Bool?
+        var aiModel: AIModel?
     }
 
     init() {
@@ -201,6 +205,7 @@ final class SettingsStore: ObservableObject {
         finderMinCollectSize = saved?.finderMinCollectSize ?? 200
         downloadLocation = saved?.downloadLocation ?? .downloadsFolder
         restoreSession = saved?.restoreSession ?? false
+        aiModel = saved?.aiModel ?? .onDevice
     }
     private func save() {
         Storage.saveJSON(Payload(searchEngine: searchEngine, customEngines: customEngines,
@@ -209,7 +214,8 @@ final class SettingsStore: ObservableObject {
                                  newTabPlacement: newTabPlacement,
                                  linkHoverEnabled: linkHoverEnabled, linkHoverDelay: linkHoverDelay,
                                  finderAutoTag: finderAutoTag, finderMinCollectSize: finderMinCollectSize,
-                                 downloadLocation: downloadLocation, restoreSession: restoreSession),
+                                 downloadLocation: downloadLocation, restoreSession: restoreSession,
+                                 aiModel: aiModel),
                          to: "settings.json")
     }
     private func hoverChanged() {

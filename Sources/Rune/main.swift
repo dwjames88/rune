@@ -17,12 +17,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let finder = FinderStore()
     let downloads = DownloadStore()
     let zoomLevels = ZoomStore()
+    lazy var ai = AIService(claude: claude, settings: settings)
     lazy var model = BrowserModel(settings: settings, history: history, shortcuts: shortcuts,
-                                  claude: claude, finder: finder, downloads: downloads,
+                                  ai: ai, finder: finder, downloads: downloads,
                                   zoomLevels: zoomLevels)
     lazy var settingsWindow = SettingsWindowController(
         settings: settings, shortcuts: shortcuts, history: history, appearance: appearance,
-        claude: claude, zoomLevels: zoomLevels, model: { [unowned self] in self.model })
+        ai: ai, zoomLevels: zoomLevels, model: { [unowned self] in self.model })
     lazy var finderWindow = FinderWindowController(model: model, appearance: appearance)
     private var window: NSWindow?
 
@@ -124,7 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// good.
     private func newPrivateWindow() {
         let privateModel = BrowserModel(settings: settings, history: history, shortcuts: shortcuts,
-                                        claude: claude, finder: finder, downloads: downloads,
+                                        ai: ai, finder: finder, downloads: downloads,
                                         zoomLevels: zoomLevels, isPrivate: true)
         let window = makeBrowserWindow(for: privateModel)
         window.setContentSize(NSSize(width: 1100, height: 720))

@@ -22,10 +22,10 @@ final class SummaryCache: ObservableObject {
 
 // MARK: - Link hover popover
 
-/// Hover a link → Claude tells you where it goes, before you click.
+/// Hover a link → Rune tells you where it goes, before you click.
 struct LinkSummaryPopover: View {
     let target: HoverTarget
-    @ObservedObject var claude: ClaudeService
+    @ObservedObject var ai: AIService
     @EnvironmentObject var appearance: AppearanceStore
     @StateObject private var cache = SummaryCache.shared
 
@@ -65,15 +65,15 @@ struct LinkSummaryPopover: View {
     private func load() async {
         summary = cache.get(target.url); error = nil
         guard summary == nil else { return }
-        guard claude.hasKey else { error = "Add an API key in Settings ▸ Claude to preview links."; return }
+        guard ai.isAvailable else { error = "No model available — see Settings ▸ AI."; return }
         do {
             let text = try await PageBridge.remoteText(for: target.url)
             guard !text.isEmpty else { error = "Couldn't read that page."; return }
-            let result = try await claude.complete(
+            let result = try await ai.complete(
                 system: "You summarize a web page for someone deciding whether to click its link. "
                     + "Two sentences maximum. Lead with what the page actually is. No preamble.",
                 user: "URL: \(target.url.absoluteString)\n\nPage text:\n\(text)",
-                maxTokens: 160, effort: "low")
+                maxTokens: 160, effort: .low)
             cache.set(target.url, result)
             summary = result
         } catch {
@@ -87,7 +87,7 @@ struct LinkSummaryPopover: View {
 /// Select text → Explain / Summarize / Translate, in place.
 struct SelectionActions: View {
     let target: SelectionTarget
-    @ObservedObject var claude: ClaudeService
+    @ObservedObject var ai: AIService
     @EnvironmentObject var appearance: AppearanceStore
 
     @State private var result: String?
@@ -140,12 +140,12 @@ struct SelectionActions: View {
     }
 
     private func run(system: String) async {
-        guard claude.hasKey else { error = "Add an API key in Settings ▸ Claude."; return }
+        guard ai.isAvailable else { error = "No model available — see Settings ▸ AI."; return }
         working = true; error = nil
         defer { working = false }
         do {
-            result = try await claude.complete(system: system, user: target.text,
-                                               maxTokens: 500, effort: "low")
+            result = try await ai.complete(system: system, user: target.text,
+                                           maxTokens: 500, effort: .low)
         } catch {
             self.error = error.localizedDescription
         }
@@ -158,7 +158,7 @@ struct SelectionActions: View {
 /// the way. Not a chat window — no history, no sidebar.
 struct AskBar: View {
     @ObservedObject var model: BrowserModel
-    @ObservedObject var claude: ClaudeService
+    @ObservedObject var ai: AIService
     @Binding var isPresented: Bool
     @EnvironmentObject var appearance: AppearanceStore
 
@@ -208,7 +208,7 @@ struct AskBar: View {
     private func ask() async {
         let q = question.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty, let tab = model.activeTab else { return }
-        guard claude.hasKey else { error = "Add an API key in Settings ▸ Claude."; return }
+        guard ai.isAvailable else { error = "No model available — see Settings ▸ AI."; return }
 
         working = true; answer = ""; error = nil
         defer { working = false }
@@ -219,7 +219,7 @@ struct AskBar: View {
         let user = "Page: \(tab.title) — \(tab.urlString)\n\n\(text)\n\nQuestion: \(q)"
 
         do {
-            for try await chunk in claude.stream(system: system, user: user, maxTokens: 900, effort: "medium") {
+            for try await chunk in ai.stream(system: system, user: user, maxTokens: 900, effort: .medium) {
                 answer += chunk
             }
         } catch {

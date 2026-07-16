@@ -55,6 +55,22 @@ All shipped. Kept here as the map of what landed where.
 
 ## Tier 2 — Flagship features of the field (aligned with Rune's ethos)
 
+0. **On-device AI** — ✅ **DONE (v1.01)**. Apple's `FoundationModels` runs every
+   AI feature by default: free, offline, and the page never leaves the Mac —
+   which for a browser is the whole argument. Claude stays as the opt-in
+   upgrade, chosen by one picker in Settings ▸ AI.
+   - `AI.swift`: an `AIProvider` protocol both models implement, and an
+     `AIService` that owns the choice and hides the difference. Every AI
+     feature is written once and runs on whatever is there.
+   - The local model streams cumulative snapshots while Claude streams deltas;
+     the local provider diffs them down so both honour one contract.
+   - `FoundationModels` is weak-linked (see `Package.swift`), so Rune still
+     launches on macOS 14/15 and simply reports no on-device model.
+   - Availability decides the UI: with neither model, every AI affordance
+     disappears rather than sitting there greyed out. No FOMO.
+   - Built first on purpose, so the Tier 3 AI features are born on the local
+     model instead of being ported to it later.
+
 1. **Content blocking** (Vivaldi/Orion/Brave/Safari) — `WKContentRuleList`
    with compiled EasyList + cookie-banner rules. Native, zero deps, huge
    speed/privacy win; later a Safari-style per-page privacy report.

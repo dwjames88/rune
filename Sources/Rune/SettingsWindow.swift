@@ -9,16 +9,16 @@ final class SettingsWindowController {
     let shortcuts: ShortcutStore
     let history: HistoryStore
     let appearance: AppearanceStore
-    let claude: ClaudeService
+    let ai: AIService
     let zoomLevels: ZoomStore
     /// Resolved lazily: the browser model is built after this controller.
     let model: () -> BrowserModel
 
     init(settings: SettingsStore, shortcuts: ShortcutStore, history: HistoryStore,
-         appearance: AppearanceStore, claude: ClaudeService, zoomLevels: ZoomStore,
+         appearance: AppearanceStore, ai: AIService, zoomLevels: ZoomStore,
          model: @escaping () -> BrowserModel) {
         self.settings = settings; self.shortcuts = shortcuts; self.history = history
-        self.appearance = appearance; self.claude = claude
+        self.appearance = appearance; self.ai = ai
         self.zoomLevels = zoomLevels; self.model = model
     }
 
@@ -31,7 +31,7 @@ final class SettingsWindowController {
             w.center(); w.setFrameAutosaveName("RuneSettings"); w.isReleasedWhenClosed = false
             w.contentViewController = NSHostingController(rootView: RuneSettingsView(
                 settings: settings, shortcuts: shortcuts, history: history,
-                appearance: appearance, claude: claude, zoomLevels: zoomLevels, model: model))
+                appearance: appearance, ai: ai, zoomLevels: zoomLevels, model: model))
             window = w
         }
         window?.makeKeyAndOrderFront(nil)
@@ -44,11 +44,11 @@ private struct RuneSettingsView: View {
     @ObservedObject var shortcuts: ShortcutStore
     @ObservedObject var history: HistoryStore
     @ObservedObject var appearance: AppearanceStore
-    @ObservedObject var claude: ClaudeService
+    @ObservedObject var ai: AIService
     @ObservedObject var zoomLevels: ZoomStore
     let model: () -> BrowserModel
 
-    enum Tab: String, CaseIterable { case appearance = "Appearance", presets = "Presets", browsing = "Browsing", claude = "Claude", shortcuts = "Shortcuts" }
+    enum Tab: String, CaseIterable { case appearance = "Appearance", presets = "Presets", browsing = "Browsing", ai = "AI", shortcuts = "Shortcuts" }
     @State private var tab: Tab = .appearance
 
     var body: some View {
@@ -63,7 +63,7 @@ private struct RuneSettingsView: View {
             case .presets: PresetsPane(appearance: appearance)
             case .browsing: BrowsingPane(settings: settings, history: history,
                                          zoomLevels: zoomLevels, model: model)
-            case .claude: ClaudePane(claude: claude, settings: settings)
+            case .ai: AIPane(ai: ai, settings: settings)
             case .shortcuts: ShortcutsPane(shortcuts: shortcuts)
             }
         }
@@ -388,7 +388,7 @@ private struct BrowsingPane: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
-                Toggle("Auto-tag saves with Claude", isOn: $settings.finderAutoTag)
+                Toggle("Auto-tag saves with AI", isOn: $settings.finderAutoTag)
                 HStack {
                     Text("Batch collect: skip images smaller than")
                     TextField("", value: $settings.finderMinCollectSize, format: .number)
@@ -501,16 +501,44 @@ private final class RecorderNSView: NSView {
 }
 
 
-// MARK: Claude
+// MARK: AI
 
-private struct ClaudePane: View {
-    @ObservedObject var claude: ClaudeService
+private struct AIPane: View {
+    @ObservedObject var ai: AIService
     @ObservedObject var settings: SettingsStore
     @State private var key = ""
     @State private var saved = false
 
+    private var claude: ClaudeService { ai.claude }
+
     var body: some View {
         Form {
+            Section {
+                // The picker is only a choice when there's something to choose
+                // between: without the local model, Claude is simply what runs.
+                if ai.localAvailable {
+                    Picker("Run AI with", selection: $settings.aiModel) {
+                        ForEach(AIModel.allCases) { Text($0.label).tag($0) }
+                    }
+                    Text(settings.aiModel.detail).font(.caption).foregroundStyle(.secondary)
+                }
+                HStack {
+                    Image(systemName: ai.localAvailable ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(ai.localAvailable ? .green : .orange)
+                    Text(ai.localAvailable
+                         ? "On-device model ready."
+                         : (ai.localUnavailableReason ?? "On-device model unavailable."))
+                    Spacer()
+                }
+            } header: {
+                Text("Model")
+            } footer: {
+                Text(ai.localAvailable
+                     ? "On-device runs on Apple Intelligence: free, offline, and the page never leaves this Mac. Claude is sharper on hard questions, and costs per request."
+                     : "Rune prefers Apple's on-device model. Without it, AI features run on Claude — and with neither, Rune hides them rather than dangling something you can't use.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section {
                 HStack {
                     Image(systemName: claude.hasKey ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
@@ -532,7 +560,7 @@ private struct ClaudePane: View {
             } header: {
                 Text("Anthropic API Key")
             } footer: {
-                Text("Stored in the macOS Keychain — never in Rune's settings files, and never sent anywhere but api.anthropic.com. Get a key at console.anthropic.com.")
+                Text("Optional — only needed to run AI on Claude. Stored in the macOS Keychain, never in Rune's settings files, and never sent anywhere but api.anthropic.com. Get a key at console.anthropic.com.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -550,7 +578,7 @@ private struct ClaudePane: View {
             } header: {
                 Text("Link Previews")
             } footer: {
-                Text("How long a link must sit under your cursor before Claude summarizes it. Applies immediately, even to open pages.")
+                Text("How long a link must sit under your cursor before Rune summarizes it. Applies immediately, even to open pages.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -560,13 +588,26 @@ private struct ClaudePane: View {
                 Label("Press ⌘J to ask about the page you're on", systemImage: "sparkles")
                 Label("Type a question in the address bar to find a page from memory", systemImage: "magnifyingglass")
             } header: {
-                Text("What Claude Does Here")
+                Text("What AI Does Here")
             } footer: {
-                Text("Model: \(ClaudeService.model). Page text is only sent when you invoke one of these.")
-                    .font(.caption).foregroundStyle(.secondary)
+                Text(privacyNote).font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
+    }
+
+    /// Where your page text actually goes depends on which model is answering,
+    /// and that difference is the entire argument for running locally — so say
+    /// which one it is rather than something vague that covers both.
+    private var privacyNote: String {
+        switch ai.active {
+        case .onDevice:
+            "Running on Apple's on-device model — page text never leaves this Mac."
+        case .claude:
+            "Running on \(ClaudeService.model) — page text goes to Anthropic when you invoke one of these, and at no other time."
+        case nil:
+            "No model available, so Rune hides these rather than showing you something that can't run."
+        }
     }
 
     private func save() {

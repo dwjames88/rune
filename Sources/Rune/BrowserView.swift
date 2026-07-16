@@ -21,7 +21,7 @@ struct BrowserView: View {
             .background(appearance.windowBG)
 
             if showAsk {
-                AskBar(model: model, claude: model.claude, isPresented: $showAsk)
+                AskBar(model: model, ai: model.ai, isPresented: $showAsk)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
             if showPalette {
@@ -636,7 +636,7 @@ private struct ContentArea: View {
         }
         // Sounds like a description, not a destination — offer Claude.
         let words = address.split(separator: " ").count
-        if model.claude.hasKey, words >= 3 { out.append(.askClaude(address)) }
+        if model.ai.isAvailable, words >= 3 { out.append(.askAI(address)) }
         suggestions = out
     }
 
@@ -740,7 +740,7 @@ private struct ContentArea: View {
         switch list[min(highlighted, list.count - 1)] {
         case .navigate(let q): model.navigate(q)
         case .history(let e): model.navigate(e.url)
-        case .askClaude(let q):
+        case .askAI(let q):
             Task {
                 if let url = try? await model.findInHistory(q) { model.navigate(url.absoluteString) }
                 else { model.navigate(q) }   // nothing matched — fall back to a search
@@ -754,12 +754,12 @@ private struct ContentArea: View {
 enum Suggestion: Identifiable {
     case navigate(String)
     case history(HistoryEntry)
-    case askClaude(String)
+    case askAI(String)
     var id: String {
         switch self {
         case .navigate(let q): "go:\(q)"
         case .history(let e): "h:\(e.url)"
-        case .askClaude(let q): "ai:\(q)"
+        case .askAI(let q): "ai:\(q)"
         }
     }
 }
@@ -803,7 +803,7 @@ private struct SuggestionList: View {
         switch s {
         case .navigate(let q): return model.resolve(q).map { _ in q.contains(".") ? "arrow.up.forward" : "magnifyingglass" } ?? "magnifyingglass"
         case .history: return "clock"
-        case .askClaude: return "sparkles"
+        case .askAI: return "sparkles"
         }
     }
     private func title(_ s: Suggestion) -> String {
@@ -812,7 +812,7 @@ private struct SuggestionList: View {
             if q.contains(".") && !q.contains(" ") { return "Go to \(q)" }
             return "Search \(model.settings.searchEngine.name) for “\(q)”"
         case .history(let e): return e.title.isEmpty ? e.url : e.title
-        case .askClaude: return "Ask Claude to find this in your history"
+        case .askAI: return "Find this in your history"
         }
     }
 }
@@ -829,7 +829,7 @@ private struct TabContent: View {
                 // select text for actions.
                 .overlay(alignment: .topLeading) {
                     if let hover = tab.hoveredLink {
-                        LinkSummaryPopover(target: hover, claude: model.claude)
+                        LinkSummaryPopover(target: hover, ai: model.ai)
                             .offset(x: min(max(8, hover.x), 900), y: hover.y + 6)
                             .allowsHitTesting(false)
                             .transition(.opacity)
@@ -837,7 +837,7 @@ private struct TabContent: View {
                 }
                 .overlay(alignment: .topLeading) {
                     if let selection = tab.selection {
-                        SelectionActions(target: selection, claude: model.claude)
+                        SelectionActions(target: selection, ai: model.ai)
                             .offset(x: min(max(8, selection.x), 860), y: selection.y + 8)
                             .transition(.opacity)
                     }

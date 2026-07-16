@@ -206,7 +206,8 @@ final class BrowserModel: ObservableObject {
     let settings: SettingsStore
     let history: HistoryStore
     let shortcuts: ShortcutStore
-    let claude: ClaudeService
+    /// Rune's AI, whichever model is behind it today.
+    let ai: AIService
     let finder: FinderStore
     let downloads: DownloadStore
     let zoomLevels: ZoomStore
@@ -221,10 +222,10 @@ final class BrowserModel: ObservableObject {
     private struct Persisted: Codable { var favorites: [SavedTab]; var pinned: [SavedTab]; var folders: [Folder] }
 
     init(settings: SettingsStore, history: HistoryStore, shortcuts: ShortcutStore,
-         claude: ClaudeService, finder: FinderStore, downloads: DownloadStore,
+         ai: AIService, finder: FinderStore, downloads: DownloadStore,
          zoomLevels: ZoomStore, isPrivate: Bool = false) {
         self.settings = settings; self.history = history; self.shortcuts = shortcuts
-        self.claude = claude; self.finder = finder; self.downloads = downloads
+        self.ai = ai; self.finder = finder; self.downloads = downloads
         self.zoomLevels = zoomLevels; self.isPrivate = isPrivate
         let config = WKWebViewConfiguration()
         config.websiteDataStore = isPrivate ? .nonPersistent() : .default()
@@ -325,8 +326,8 @@ final class BrowserModel: ObservableObject {
                                                  sourceTitle: title, tags: tags)
                 if !quiet { NotificationCenter.default.post(name: .finderToast, object: "Saved to Finder") }
                 if settings.finderAutoTag {
-                    let claude = self.claude, finder = self.finder
-                    Task { await finder.autoTag(item, using: claude) }
+                    let ai = self.ai, finder = self.finder
+                    Task { await finder.autoTag(item, using: ai) }
                 }
             } catch {
                 if !quiet {
@@ -773,8 +774,9 @@ final class BrowserModel: ObservableObject {
         select(.session(sessionTabs[next].id))
     }
 
-    /// "that article about titanium frames" → the actual URL, chosen by Claude
-    /// from your history. Local prediction handles prefixes; this handles intent.
+    /// "that article about titanium frames" → the actual URL, picked out of your
+    /// history by whichever model is running. Local prediction handles prefixes;
+    /// this handles intent.
     func findInHistory(_ query: String) async throws -> URL? {
         let candidates = history.entries
             .sorted { ($0.visitCount, $0.lastVisited) > ($1.visitCount, $1.lastVisited) }
@@ -785,11 +787,11 @@ final class BrowserModel: ObservableObject {
             .map { "\($0.offset). \($0.element.title) — \($0.element.url)" }
             .joined(separator: "\n")
 
-        let answer = try await claude.complete(
+        let answer = try await ai.complete(
             system: "You match a person's vague description to a page in their browsing history. "
                 + "Reply with ONLY the number of the best match, or NONE if nothing fits.",
             user: "History:\n\(list)\n\nThey're looking for: \(query)",
-            maxTokens: 12, effort: "low")
+            maxTokens: 12, effort: .low)
 
         let digits = answer.trimmingCharacters(in: .whitespacesAndNewlines)
             .prefix(while: \.isNumber)

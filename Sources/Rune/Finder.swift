@@ -234,13 +234,13 @@ final class FinderStore: ObservableObject {
 
     /// Suggest tags from the item's context and merge them in. Fails silently;
     /// tagging is a convenience, never a blocker.
-    func autoTag(_ item: FinderItem, using claude: ClaudeService) async {
-        guard claude.hasKey else { return }
+    func autoTag(_ item: FinderItem, using ai: AIService) async {
+        guard ai.isAvailable else { return }
         let context = "File: \(item.fileName).\(item.ext)\nFrom page: \(item.sourceTitle)\nPage URL: \(item.sourceURL)"
-        guard let answer = try? await claude.complete(
+        guard let answer = try? await ai.complete(
             system: "You tag saved design inspiration for later retrieval. Reply with ONLY 2-4 short "
                 + "lowercase tags, comma-separated. Concrete subjects and styles, no filler words.",
-            user: context, maxTokens: 30, effort: "low") else { return }
+            user: context, maxTokens: 30, effort: .low) else { return }
         let suggested = answer.lowercased()
             .split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
