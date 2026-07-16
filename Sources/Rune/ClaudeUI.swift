@@ -1,12 +1,23 @@
 import SwiftUI
 
-/// Cache so re-hovering a link doesn't re-summarize it.
+/// Cache so re-hovering a link doesn't re-summarize it. Capped so a long
+/// session doesn't accumulate summaries forever (drops ~oldest half when full).
 @MainActor
 final class SummaryCache: ObservableObject {
     static let shared = SummaryCache()
     private var cache: [URL: String] = [:]
+    private var order: [URL] = []
+    private let cap = 200
+
     func get(_ url: URL) -> String? { cache[url] }
-    func set(_ url: URL, _ text: String) { cache[url] = text }
+    func set(_ url: URL, _ text: String) {
+        if cache[url] == nil { order.append(url) }
+        cache[url] = text
+        if order.count > cap {
+            for old in order.prefix(cap / 2) { cache[old] = nil }
+            order.removeFirst(cap / 2)
+        }
+    }
 }
 
 // MARK: - Link hover popover
@@ -189,7 +200,7 @@ struct AskBar: View {
         .shadow(color: .black.opacity(0.22), radius: 24, y: 8)
         .padding(.top, 12)
         .onAppear { focused = true }
-        .onKeyPress(.escape) { close(); return .handled }
+        .dismissOnEscape { close() }
     }
 
     private func close() { isPresented = false; answer = ""; error = nil; question = "" }

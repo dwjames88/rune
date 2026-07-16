@@ -10,11 +10,16 @@ final class SettingsWindowController {
     let history: HistoryStore
     let appearance: AppearanceStore
     let claude: ClaudeService
+    let zoomLevels: ZoomStore
+    /// Resolved lazily: the browser model is built after this controller.
+    let model: () -> BrowserModel
 
     init(settings: SettingsStore, shortcuts: ShortcutStore, history: HistoryStore,
-         appearance: AppearanceStore, claude: ClaudeService) {
+         appearance: AppearanceStore, claude: ClaudeService, zoomLevels: ZoomStore,
+         model: @escaping () -> BrowserModel) {
         self.settings = settings; self.shortcuts = shortcuts; self.history = history
         self.appearance = appearance; self.claude = claude
+        self.zoomLevels = zoomLevels; self.model = model
     }
 
     func show() {
@@ -26,7 +31,7 @@ final class SettingsWindowController {
             w.center(); w.setFrameAutosaveName("RuneSettings"); w.isReleasedWhenClosed = false
             w.contentViewController = NSHostingController(rootView: RuneSettingsView(
                 settings: settings, shortcuts: shortcuts, history: history,
-                appearance: appearance, claude: claude))
+                appearance: appearance, claude: claude, zoomLevels: zoomLevels, model: model))
             window = w
         }
         window?.makeKeyAndOrderFront(nil)
@@ -40,6 +45,8 @@ private struct RuneSettingsView: View {
     @ObservedObject var history: HistoryStore
     @ObservedObject var appearance: AppearanceStore
     @ObservedObject var claude: ClaudeService
+    @ObservedObject var zoomLevels: ZoomStore
+    let model: () -> BrowserModel
 
     enum Tab: String, CaseIterable { case appearance = "Appearance", presets = "Presets", browsing = "Browsing", claude = "Claude", shortcuts = "Shortcuts" }
     @State private var tab: Tab = .appearance
@@ -54,8 +61,9 @@ private struct RuneSettingsView: View {
             switch tab {
             case .appearance: AppearancePane(appearance: appearance)
             case .presets: PresetsPane(appearance: appearance)
-            case .browsing: BrowsingPane(settings: settings, history: history)
-            case .claude: ClaudePane(claude: claude)
+            case .browsing: BrowsingPane(settings: settings, history: history,
+                                         zoomLevels: zoomLevels, model: model)
+            case .claude: ClaudePane(claude: claude, settings: settings)
             case .shortcuts: ShortcutsPane(shortcuts: shortcuts)
             }
         }
@@ -109,6 +117,45 @@ private struct AppearancePane: View {
                 sliderRow("Corner radius", value: a.cornerRadius, range: 0...16, step: 1, suffix: "px")
                 Toggle("Sidebar on the right", isOn: a.sidebarOnRight)
             }
+            Section {
+                Toggle("Compact address bar", isOn: a.compactAddressBar)
+                ForEach(Command.allCases) { command in
+                    Toggle(isOn: toolbarBinding(command)) {
+                        HStack(spacing: 8) {
+                            Image(systemName: command.icon).frame(width: 20).foregroundStyle(.secondary)
+                            Text(command.title)
+                        }
+                    }
+                }
+            } header: {
+                Text("Toolbar")
+            } footer: {
+                Text("Checked commands appear as buttons before the address bar. Compact address bar shows just the site until you click it.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Start Page") {
+                TextField("Greeting", text: a.startPageGreeting, prompt: Text("Rune"))
+                Toggle("Show favorites", isOn: a.startPageShowFavorites)
+                Toggle("Show recent history", isOn: a.startPageShowRecents)
+                ColorTokenRow(label: "Background", token: a.startPageBackground)
+            }
+            Section {
+                HStack(spacing: 14) {
+                    Image(nsImage: appIconPreview)
+                        .resizable().scaledToFit().frame(width: 56, height: 56)
+                    Toggle("Custom app icon", isOn: customIconOn)
+                    Spacer()
+                }
+                if appearance.appearance.appIconBackground != "default" {
+                    ColorTokenRow(label: "Background", token: a.appIconBackground, allowSystem: false)
+                    ColorTokenRow(label: "Rune", token: a.appIconGlyph, allowSystem: false)
+                }
+            } header: {
+                Text("App Icon")
+            } footer: {
+                Text("Custom icons are drawn from the rune glyph in your colors and apply to the Dock while Rune runs. Off = the bundled icon.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Window") {
                 Toggle("Hide traffic lights", isOn: a.hideTrafficLights)
                 Text("Hides the red/yellow/green buttons. Drag the toolbar to move the window; ⌘W / ⌘M still work.")
@@ -119,6 +166,33 @@ private struct AppearancePane: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var customIconOn: Binding<Bool> {
+        Binding(
+            get: { appearance.appearance.appIconBackground != "default" },
+            set: { on in
+                appearance.appearance.appIconBackground = on ? "#48D4EA" : "default"
+                appearance.appearance.appIconGlyph = on ? "#002678" : "default"
+            })
+    }
+
+    private var appIconPreview: NSImage {
+        AppIconRenderer.custom(for: appearance.appearance, size: 256)
+            ?? (NSImage(named: NSImage.applicationIconName) ?? NSImage())
+    }
+
+    /// Membership toggle for a command in the toolbar button list — checking
+    /// appends it after the existing buttons, unchecking removes it.
+    private func toolbarBinding(_ command: Command) -> Binding<Bool> {
+        Binding(
+            get: { appearance.appearance.toolbarButtons.contains(command.rawValue) },
+            set: { on in
+                var buttons = appearance.appearance.toolbarButtons
+                buttons.removeAll { $0 == command.rawValue }
+                if on { buttons.append(command.rawValue) }
+                appearance.appearance.toolbarButtons = buttons
+            })
     }
 
     private func sliderRow(_ label: String, value: Binding<Double>, range: ClosedRange<Double>, step: Double, suffix: String) -> some View {
@@ -222,6 +296,12 @@ private struct PresetsPane: View {
 private struct BrowsingPane: View {
     @ObservedObject var settings: SettingsStore
     @ObservedObject var history: HistoryStore
+    @ObservedObject var zoomLevels: ZoomStore
+    let model: () -> BrowserModel
+
+    @State private var importing = false
+    @State private var importResult: String?
+
     var body: some View {
         Form {
             Section("Search") {
@@ -229,16 +309,126 @@ private struct BrowsingPane: View {
                     ForEach(settings.allEngines) { Text($0.name).tag($0) }
                 }
             }
+            Section {
+                Picker("New tabs open with", selection: $settings.newTabBehavior) {
+                    ForEach(NewTabBehavior.allCases) { Text($0.label).tag($0) }
+                }
+                if settings.newTabBehavior == .homePage {
+                    TextField("Home page", text: $settings.homePageURL,
+                              prompt: Text("example.com"))
+                }
+                Picker("Place new tabs", selection: $settings.newTabPlacement) {
+                    ForEach(NewTabPlacement.allCases) { Text($0.label).tag($0) }
+                }
+            } header: {
+                Text("New Tabs")
+            } footer: {
+                Text("⌘T never stacks empty tabs — if a start page is already open, it's focused instead.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                Toggle("Reopen last session's tabs on launch", isOn: $settings.restoreSession)
+            } header: {
+                Text("Session")
+            } footer: {
+                Text("Off by default: session tabs are meant to be disposable. Pinned tabs and favorites always come back either way.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                Picker("Save downloads to", selection: $settings.downloadLocation) {
+                    ForEach(DownloadLocation.allCases) { Text($0.label).tag($0) }
+                }
+            } header: {
+                Text("Downloads")
+            } footer: {
+                Text("⌥⌘L lists what you've fetched this launch. Turn “\(Command.showDownloads.title)” on under Appearance ▸ Toolbar for a button with live progress.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                LabeledContent("Zoomed sites") {
+                    HStack {
+                        Text("\(zoomLevels.levels.count)").foregroundStyle(.secondary)
+                        Button("Reset All") { zoomLevels.clear() }
+                            .disabled(zoomLevels.levels.isEmpty)
+                    }
+                }
+            } header: {
+                Text("Zoom")
+            } footer: {
+                Text("⌘+ and ⌘− set the zoom for the whole site, remembered for next time. ⌘0 forgets it again.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                HStack {
+                    ForEach(BookmarkImport.Source.allCases) { source in
+                        Button("Import from \(source.label)") { runImport(source) }
+                            .disabled(importing)
+                    }
+                    if importing { ProgressView().controlSize(.small) }
+                    Spacer()
+                }
+                if let importResult {
+                    Text(importResult).font(.caption).foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Bookmarks")
+            } footer: {
+                Text("Bookmarks land in your pinned shelf, keeping their folders. Anything you already have is skipped, so importing twice is safe.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                Picker("Auto Picture in Picture", selection: $settings.autoPiP) {
+                    ForEach(AutoPiPMode.allCases) { Text($0.label).tag($0) }
+                }
+                Toggle("Return video to the page when you come back", isOn: $settings.autoPiPReturnInline)
+            } header: {
+                Text("Media")
+            } footer: {
+                Text("A playing video pops into a floating window when you leave its tab. \"\(Command.togglePiP.title)\" in the View menu toggles it manually.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                Toggle("Auto-tag saves with Claude", isOn: $settings.finderAutoTag)
+                HStack {
+                    Text("Batch collect: skip images smaller than")
+                    TextField("", value: $settings.finderMinCollectSize, format: .number)
+                        .frame(width: 50).multilineTextAlignment(.trailing)
+                    Text("px")
+                }
+            } header: {
+                Text("Finder")
+            } footer: {
+                Text("The Finder saves inspiration from the web — right-click any image, press ⌥S for the image under your cursor, or ⇧⌘S to collect a whole page. Open it with ⌥⌘F.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Browsing Data") {
                 LabeledContent("History") {
                     HStack { Text("\(history.entries.count) entries").foregroundStyle(.secondary)
                         Button("Clear") { history.clear() } }
                 }
-                Text("You stay signed in across launches — cookies and site data persist automatically.")
+                Text("You stay signed in across launches — cookies and site data persist automatically. A private window (⇧⌘N) keeps none of it.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
+    }
+
+    private func runImport(_ source: BookmarkImport.Source) {
+        importing = true
+        importResult = nil
+        Task {
+            defer { importing = false }
+            do {
+                let added = model().importBookmarks(try await BookmarkImport.load(from: source))
+                importResult = added == 0
+                    ? "Nothing new — those \(source.label) bookmarks are already pinned."
+                    : "Added \(added) bookmark\(added == 1 ? "" : "s") from \(source.label)."
+            } catch BookmarkImport.Failure.cancelled {
+                importResult = nil
+            } catch {
+                importResult = error.localizedDescription
+            }
+        }
     }
 }
 
@@ -315,6 +505,7 @@ private final class RecorderNSView: NSView {
 
 private struct ClaudePane: View {
     @ObservedObject var claude: ClaudeService
+    @ObservedObject var settings: SettingsStore
     @State private var key = ""
     @State private var saved = false
 
@@ -342,6 +533,24 @@ private struct ClaudePane: View {
                 Text("Anthropic API Key")
             } footer: {
                 Text("Stored in the macOS Keychain — never in Rune's settings files, and never sent anywhere but api.anthropic.com. Get a key at console.anthropic.com.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle("Summarize links on hover", isOn: $settings.linkHoverEnabled)
+                if settings.linkHoverEnabled {
+                    HStack {
+                        Text("Hover delay")
+                        Slider(value: $settings.linkHoverDelay, in: 0.1...10.0, step: 0.05)
+                        Text(String(format: "%.2f s", settings.linkHoverDelay))
+                            .monospacedDigit().foregroundStyle(.secondary)
+                            .frame(width: 52, alignment: .trailing)
+                    }
+                }
+            } header: {
+                Text("Link Previews")
+            } footer: {
+                Text("How long a link must sit under your cursor before Claude summarizes it. Applies immediately, even to open pages.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 

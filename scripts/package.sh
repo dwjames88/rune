@@ -1,58 +1,36 @@
 #!/bin/bash
-# Builds Rune and runs it as a proper .app bundle (WKWebView needs a bundle
-# identifier to launch its web content process).
+# Packages Rune for sharing: release build → dist/Rune.app → dist/Rune.zip.
+# Separate from dev-run.sh so packaging never clobbers the .app you're running.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-CONFIG="${1:-debug}"
-swift build -c "$CONFIG" >/dev/null
-BIN="$(swift build -c "$CONFIG" --show-bin-path)/Rune"
+VERSION="${1:-0.1.0}"
 
-APP="$REPO_ROOT/.build/Rune.app"
-rm -rf "$APP"
+echo "› Building release"
+swift build -c release >/dev/null
+BIN="$(swift build -c release --show-bin-path)/Rune"
+
+APP="$REPO_ROOT/dist/Rune.app"
+rm -rf "$REPO_ROOT/dist"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Rune"
-# Release builds ship without symbols — cuts the binary roughly in third.
-if [ "$CONFIG" = "release" ]; then
-    strip -rSTx "$APP/Contents/MacOS/Rune"
-fi
+strip -rSTx "$APP/Contents/MacOS/Rune"
 
-# App icon. Preferred path: compile the Icon Composer bundle (Assets/Rune.icon)
-# with actool — produces Assets.car (the real layered icon on macOS 26+) plus a
-# legacy Rune.icns. Falls back to sips/iconutil from the 1024px PNG when the
-# Xcode tools aren't available. Cached in .build until the source changes.
+# App icon: Icon Composer bundle via actool (Assets.car + legacy icns).
 ICON_COMPOSER="$REPO_ROOT/Assets/Rune.icon"
-ICON_SRC="$REPO_ROOT/Assets/Rune-iOS-Default-1024@1x.png"
-ICON_CACHE="$REPO_ROOT/.build/icon"
+ICON_TMP="$(mktemp -d)"
 if [ -d "$ICON_COMPOSER" ] && xcrun --find actool >/dev/null 2>&1; then
-    if [ ! -f "$ICON_CACHE/Assets.car" ] || \
-       [ -n "$(find "$ICON_COMPOSER" -newer "$ICON_CACHE/Assets.car" 2>/dev/null)" ]; then
-        mkdir -p "$ICON_CACHE"
-        xcrun actool \
-            --app-icon Rune --include-all-app-icons \
-            --compile "$ICON_CACHE" \
-            --platform macosx --minimum-deployment-target 26.0 \
-            --output-partial-info-plist "$ICON_CACHE/partial.plist" \
-            "$ICON_COMPOSER" >/dev/null
-    fi
-    cp "$ICON_CACHE/Assets.car" "$ICON_CACHE/Rune.icns" "$APP/Contents/Resources/"
-elif [ -f "$ICON_SRC" ]; then
-    ICNS="$REPO_ROOT/.build/Rune.icns"
-    if [ ! -f "$ICNS" ] || [ "$ICON_SRC" -nt "$ICNS" ]; then
-        ICONSET="$(mktemp -d)/Rune.iconset"
-        mkdir -p "$ICONSET"
-        for size in 16 32 128 256 512; do
-            sips -z "$size" "$size" "$ICON_SRC" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
-            double=$((size * 2))
-            sips -z "$double" "$double" "$ICON_SRC" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
-        done
-        iconutil -c icns "$ICONSET" -o "$ICNS"
-        rm -rf "$(dirname "$ICONSET")"
-    fi
-    cp "$ICNS" "$APP/Contents/Resources/Rune.icns"
+    xcrun actool \
+        --app-icon Rune --include-all-app-icons \
+        --compile "$ICON_TMP" \
+        --platform macosx --minimum-deployment-target 26.0 \
+        --output-partial-info-plist "$ICON_TMP/partial.plist" \
+        "$ICON_COMPOSER" >/dev/null
+    cp "$ICON_TMP/Assets.car" "$ICON_TMP/Rune.icns" "$APP/Contents/Resources/"
 fi
+rm -rf "$ICON_TMP"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -64,7 +42,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleIdentifier</key><string>com.dwjames.Rune</string>
     <key>CFBundleExecutable</key><string>Rune</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.1.0</string>
+    <key>CFBundleShortVersionString</key><string>$VERSION</string>
     <key>CFBundleIconFile</key><string>Rune</string>
     <key>CFBundleIconName</key><string>Rune</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
@@ -125,9 +103,6 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Code-sign with the first available Apple Development identity (falls back to
-# ad-hoc). Signing gives Rune a stable identity — the prerequisite for
-# integrating system features (Apple Passwords, keychain) directly.
 IDENTITY_HASH="$(security find-identity -v -p codesigning | awk 'NR==1 && /[0-9A-F]{40}/ {print $2}')"
 if [ -n "$IDENTITY_HASH" ]; then
     echo "› Signing with identity $IDENTITY_HASH"
@@ -138,5 +113,7 @@ else
 fi
 codesign --verify --verbose "$APP" 2>&1 | sed 's/^/  /'
 
-echo "› Launching $APP"
-open "$APP"
+echo "› Zipping"
+ditto -c -k --keepParent "$APP" "$REPO_ROOT/dist/Rune.zip"
+echo "› Done:"
+du -sh "$APP" "$REPO_ROOT/dist/Rune.zip"

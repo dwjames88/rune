@@ -22,6 +22,60 @@ enum Storage {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         if let data = try? encoder.encode(value) { try? data.write(to: url(name), options: .atomic) }
     }
+    static func remove(_ name: String) { try? FileManager.default.removeItem(at: url(name)) }
+}
+
+// MARK: - Zoom
+
+/// What ⌘+ / ⌘− / ⌘0 do to a zoom level.
+enum ZoomChange {
+    case larger, smaller, reset
+
+    /// The ladder ⌘+/⌘− climbs — the same stops Safari uses.
+    static let steps: [Double] = [0.5, 0.75, 0.85, 1, 1.15, 1.25, 1.5, 1.75, 2, 2.5, 3]
+
+    func applied(to level: Double) -> Double {
+        switch self {
+        case .larger: Self.steps.first { $0 > level + 0.001 } ?? Self.steps.last!
+        case .smaller: Self.steps.last { $0 < level - 0.001 } ?? Self.steps.first!
+        case .reset: 1
+        }
+    }
+}
+
+/// Page zoom per site. Keyed by host: zoom is a property of the place, not of
+/// the tab you happened to open it in.
+@MainActor
+final class ZoomStore: ObservableObject {
+    @Published private(set) var levels: [String: Double]
+
+    init() { levels = Storage.loadJSON([String: Double].self, from: "zoom.json") ?? [:] }
+
+    func level(for host: String) -> Double { levels[host] ?? 1 }
+
+    func set(_ level: Double, for host: String) {
+        // 100% is the absence of a setting, not a stored value — otherwise
+        // zoom.json fills up with every site you ever pressed ⌘0 on.
+        if abs(level - 1) < 0.001 { levels.removeValue(forKey: host) } else { levels[host] = level }
+        save()
+    }
+
+    func clear() { levels = [:]; flush() }
+
+    // Holding ⌘+ fires a burst; coalesce it into one write.
+    private var saveTask: Task<Void, Never>?
+    private func save() {
+        saveTask?.cancel()
+        saveTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            self?.flush()
+        }
+    }
+    func flush() {
+        saveTask?.cancel(); saveTask = nil
+        Storage.saveJSON(levels, to: "zoom.json")
+    }
 }
 
 // MARK: - Search engine
@@ -48,22 +102,118 @@ struct SearchEngine: Codable, Hashable, Identifiable {
 
 // MARK: - Settings
 
+/// When a playing video should automatically pop into Picture in Picture.
+enum AutoPiPMode: String, Codable, CaseIterable, Identifiable {
+    case off
+    case tabSwitch
+    case tabSwitchAndAppSwitch
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .off: "Off"
+        case .tabSwitch: "When switching tabs"
+        case .tabSwitchAndAppSwitch: "Tab switch + leaving Rune"
+        }
+    }
+}
+
+/// What a fresh tab opens with.
+enum NewTabBehavior: String, Codable, CaseIterable, Identifiable {
+    case startPage, homePage, duplicateCurrent, lastClosed
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .startPage: "Start page"
+        case .homePage: "Home page"
+        case .duplicateCurrent: "Duplicate current tab"
+        case .lastClosed: "Last closed tab"
+        }
+    }
+}
+
+/// Where a fresh tab lands in the session list.
+enum NewTabPlacement: String, Codable, CaseIterable, Identifiable {
+    case end, nextToActive
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .end: "At the end"
+        case .nextToActive: "Next to the active tab"
+        }
+    }
+}
+
 @MainActor
 final class SettingsStore: ObservableObject {
     @Published var searchEngine: SearchEngine { didSet { save() } }
     @Published var customEngines: [SearchEngine] { didSet { save() } }
+    @Published var autoPiP: AutoPiPMode { didSet { save() } }
+    /// Bring a PiP'd video back into the page when you return to its tab.
+    @Published var autoPiPReturnInline: Bool { didSet { save() } }
+    @Published var newTabBehavior: NewTabBehavior { didSet { save() } }
+    @Published var homePageURL: String { didSet { save() } }
+    @Published var newTabPlacement: NewTabPlacement { didSet { save() } }
+    /// Claude link previews: hover a link this long before the summary appears.
+    @Published var linkHoverEnabled: Bool { didSet { save(); hoverChanged() } }
+    @Published var linkHoverDelay: Double { didSet { save(); hoverChanged() } }
+    /// Finder: tag saves automatically with Claude (text-context, cheap).
+    @Published var finderAutoTag: Bool { didSet { save() } }
+    /// Finder batch collect: skip images smaller than this on either side.
+    @Published var finderMinCollectSize: Double { didSet { save() } }
+    /// Where finished downloads land.
+    @Published var downloadLocation: DownloadLocation { didSet { save() } }
+    /// Reopen last session's tabs on launch. Off by design: session tabs are
+    /// meant to be disposable, but that should be your call, not ours.
+    @Published var restoreSession: Bool { didSet { save() } }
 
     var allEngines: [SearchEngine] { SearchEngine.presets + customEngines }
 
-    private struct Payload: Codable { var searchEngine: SearchEngine; var customEngines: [SearchEngine] }
+    private struct Payload: Codable {
+        var searchEngine: SearchEngine
+        var customEngines: [SearchEngine]
+        // Optionals: absent in older settings.json
+        var autoPiP: AutoPiPMode?
+        var autoPiPReturnInline: Bool?
+        var newTabBehavior: NewTabBehavior?
+        var homePageURL: String?
+        var newTabPlacement: NewTabPlacement?
+        var linkHoverEnabled: Bool?
+        var linkHoverDelay: Double?
+        var finderAutoTag: Bool?
+        var finderMinCollectSize: Double?
+        var downloadLocation: DownloadLocation?
+        var restoreSession: Bool?
+    }
 
     init() {
         let saved = Storage.loadJSON(Payload.self, from: "settings.json")
         searchEngine = saved?.searchEngine ?? SearchEngine.presets[0]
         customEngines = saved?.customEngines ?? []
+        autoPiP = saved?.autoPiP ?? .tabSwitch
+        autoPiPReturnInline = saved?.autoPiPReturnInline ?? true
+        newTabBehavior = saved?.newTabBehavior ?? .startPage
+        homePageURL = saved?.homePageURL ?? ""
+        newTabPlacement = saved?.newTabPlacement ?? .end
+        linkHoverEnabled = saved?.linkHoverEnabled ?? true
+        linkHoverDelay = saved?.linkHoverDelay ?? 0.45
+        finderAutoTag = saved?.finderAutoTag ?? false
+        finderMinCollectSize = saved?.finderMinCollectSize ?? 200
+        downloadLocation = saved?.downloadLocation ?? .downloadsFolder
+        restoreSession = saved?.restoreSession ?? false
     }
     private func save() {
-        Storage.saveJSON(Payload(searchEngine: searchEngine, customEngines: customEngines), to: "settings.json")
+        Storage.saveJSON(Payload(searchEngine: searchEngine, customEngines: customEngines,
+                                 autoPiP: autoPiP, autoPiPReturnInline: autoPiPReturnInline,
+                                 newTabBehavior: newTabBehavior, homePageURL: homePageURL,
+                                 newTabPlacement: newTabPlacement,
+                                 linkHoverEnabled: linkHoverEnabled, linkHoverDelay: linkHoverDelay,
+                                 finderAutoTag: finderAutoTag, finderMinCollectSize: finderMinCollectSize,
+                                 downloadLocation: downloadLocation, restoreSession: restoreSession),
+                         to: "settings.json")
+    }
+    private func hoverChanged() {
+        NotificationCenter.default.post(name: .hoverSettingsChanged, object: nil)
     }
 }
 
@@ -109,17 +259,28 @@ final class HistoryStore: ObservableObject {
         }.prefix(limit).map { $0 }
     }
 
+    /// Host of a URL string by slicing — no URL/Foundation parsing. Runs for
+    /// every history entry on every keystroke, so it has to be cheap.
+    static func fastHost(of url: String) -> Substring {
+        var s = Substring(url)
+        if let r = s.range(of: "://") { s = s[r.upperBound...] }
+        if let slash = s.firstIndex(of: "/") { s = s[..<slash] }
+        if s.hasPrefix("www.") { s = s.dropFirst(4) }
+        return s
+    }
+
     /// Auto-predict: rank by *where* the query matches (host prefix beats title
     /// prefix beats a loose contains), then by how often and how recently you
     /// went there. This is what makes the address bar guess the right thing.
     func predict(_ query: String, limit: Int = 5) -> [HistoryEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return [] }
+        let now = Date()
 
         func score(_ e: HistoryEntry) -> Double? {
             let url = e.url.lowercased()
             let title = e.title.lowercased()
-            let host = URL(string: e.url)?.host?.lowercased().replacingOccurrences(of: "www.", with: "") ?? ""
+            let host = Self.fastHost(of: url)
 
             var base: Double
             if host.hasPrefix(q) { base = 1000 }
@@ -131,7 +292,7 @@ final class HistoryStore: ObservableObject {
 
             // Frequency (log-damped) and recency (decays over ~2 weeks).
             let frequency = log2(Double(e.visitCount) + 1) * 20
-            let days = max(0, Date().timeIntervalSince(e.lastVisited) / 86_400)
+            let days = max(0, now.timeIntervalSince(e.lastVisited) / 86_400)
             let recency = max(0, 60 - days * 4)
             // Prefer shorter URLs — usually the canonical page, not a deep link.
             let brevity = max(0, 30 - Double(e.url.count) / 8)
@@ -149,13 +310,26 @@ final class HistoryStore: ObservableObject {
     func isConfident(_ query: String, _ entry: HistoryEntry) -> Bool {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty, !q.contains(" ") else { return false }
-        let host = URL(string: entry.url)?.host?
-            .lowercased().replacingOccurrences(of: "www.", with: "") ?? ""
-        return host.hasPrefix(q)
+        return Self.fastHost(of: entry.url.lowercased()).hasPrefix(q)
     }
 
-    func clear() { entries = []; save() }
-    private func save() { Storage.saveJSON(entries, to: "history.json") }
+    func clear() { entries = []; flush() }
+
+    // Every page visit used to rewrite all of history.json; coalesce bursts of
+    // navigation into one write. AppDelegate flushes on quit.
+    private var saveTask: Task<Void, Never>?
+    private func save() {
+        saveTask?.cancel()
+        saveTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            self?.flush()
+        }
+    }
+    func flush() {
+        saveTask?.cancel(); saveTask = nil
+        Storage.saveJSON(entries, to: "history.json")
+    }
 }
 
 // MARK: - Shortcuts (remappable)
@@ -210,4 +384,10 @@ extension Notification.Name {
     static let showCommandPalette = Notification.Name("rune.showCommandPalette")
     static let focusAddressBar = Notification.Name("rune.focusAddressBar")
     static let showAskBar = Notification.Name("rune.showAskBar")
+    static let focusStartPage = Notification.Name("rune.focusStartPage")
+    static let hoverSettingsChanged = Notification.Name("rune.hoverSettingsChanged")
+    static let finderToast = Notification.Name("rune.finderToast")
+    static let frontBrowserWindow = Notification.Name("rune.frontBrowserWindow")
+    static let showFindBar = Notification.Name("rune.showFindBar")
+    static let showDownloads = Notification.Name("rune.showDownloads")
 }

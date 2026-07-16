@@ -5,21 +5,26 @@ import WebKit
 // MARK: - Persistent sidebar entries
 
 /// A saved sidebar entry (a favorite or a pinned tab). Persists across launches.
+///
+/// Tabs carry no colour of their own: a tab is identified by its favicon, and
+/// colour belongs to the folder that groups it. Older tabs.json files may still
+/// hold a `colorHex` key — the decoder ignores it.
 struct SavedTab: Codable, Identifiable, Equatable {
     var id = UUID()
     var url: String
     var name: String
     var customName = false
-    var colorHex: String? = nil
     var faviconPNG: Data? = nil
     var folderID: UUID? = nil       // pinned only; favorites can't be foldered
 }
 
+/// The only coloured thing in the sidebar.
 struct Folder: Codable, Identifiable, Equatable {
     var id = UUID()
     var name: String
     var icon: String = "folder.fill"
     var collapsed = false
+    var colorHex: String? = nil     // nil = the appearance accent
 }
 
 /// What is currently focused in the content area.
@@ -52,8 +57,11 @@ final class Tab: ObservableObject, Identifiable {
     @Published var canGoForward = false
     @Published var favicon: NSImage?
 
+    /// Reported by the page bridge — the tab is making noise right now.
+    @Published var isPlayingAudio = false
+    @Published var muted = false
+
     @Published var customName: String?
-    @Published var colorHex: String?
 
     // Claude's ambient hooks into the page
     @Published var hoveredLink: HoverTarget?
@@ -75,25 +83,104 @@ final class Tab: ObservableObject, Identifiable {
         webView.allowsMagnification = true
         self.webView = webView
 
+        // KVO fires repeatedly with unchanged values (especially title on SPAs);
+        // only publish real changes so observing rows don't re-render for nothing.
         webView.publisher(for: \.title).sink { [weak self] in
-            if let t = $0, !t.isEmpty { self?.title = t }
+            if let self, let t = $0, !t.isEmpty, t != self.title { self.title = t }
         }.store(in: &cancellables)
-        webView.publisher(for: \.url).sink { [weak self] in self?.urlString = $0?.absoluteString ?? "" }
-            .store(in: &cancellables)
-        webView.publisher(for: \.isLoading).assign(to: &$isLoading)
-        webView.publisher(for: \.canGoBack).assign(to: &$canGoBack)
-        webView.publisher(for: \.canGoForward).assign(to: &$canGoForward)
+        webView.publisher(for: \.url).sink { [weak self] in
+            if let self { let s = $0?.absoluteString ?? ""; if s != self.urlString { self.urlString = s } }
+        }.store(in: &cancellables)
+        webView.publisher(for: \.isLoading).removeDuplicates().assign(to: &$isLoading)
+        webView.publisher(for: \.canGoBack).removeDuplicates().assign(to: &$canGoBack)
+        webView.publisher(for: \.canGoForward).removeDuplicates().assign(to: &$canGoForward)
     }
 
     var displayName: String { customName ?? (title.isEmpty ? "New Tab" : title) }
 
     func load(_ url: URL) { webView.load(URLRequest(url: url)) }
 
+    // MARK: Audio
+
+    func toggleMute() { muted.toggle(); applyMuteToPage() }
+
+    /// Push the mute flag into the live document. Called again after every
+    /// navigation — the bridge is injected per page, so a fresh document knows
+    /// nothing about a tab that was muted before.
+    func applyMuteToPage() {
+        webView.evaluateJavaScript("window.__runeMute && window.__runeMute(\(muted))")
+    }
+
+    // MARK: Picture in Picture
+    //
+    // WebKit does not implement the W3C Picture-in-Picture API
+    // (document.pictureInPictureEnabled is undefined) — its native path is
+    // video.webkitSetPresentationMode('picture-in-picture'), which also works
+    // without transient user activation. Keep the W3C call as a fallback in
+    // case WebKit ever ships it.
+
+    private static let enterPiPJS = """
+    (function(){
+      const vids=[...document.querySelectorAll('video')];
+      if(vids.some(v=>v.webkitPresentationMode==='picture-in-picture')||document.pictureInPictureElement){return 'already-pip';}
+      const v=vids.find(v=>!v.paused&&!v.ended&&v.readyState>2);
+      if(!v){return 'no-playing-video';}
+      if(v.webkitSupportsPresentationMode&&v.webkitSupportsPresentationMode('picture-in-picture')){
+        v.webkitSetPresentationMode('picture-in-picture');return 'webkit';
+      }
+      if(document.pictureInPictureEnabled&&v.requestPictureInPicture){
+        v.requestPictureInPicture().catch(e=>{});return 'w3c';
+      }
+      return 'unsupported';
+    })();
+    """
+
+    private static let exitPiPJS = """
+    (function(){
+      const v=[...document.querySelectorAll('video')].find(v=>v.webkitPresentationMode==='picture-in-picture');
+      if(v){v.webkitSetPresentationMode('inline');return 'webkit';}
+      if(document.pictureInPictureElement){document.exitPictureInPicture().catch(e=>{});return 'w3c';}
+      return 'none';
+    })();
+    """
+
     func requestPiPIfPlaying() {
+        webView.evaluateJavaScript(Self.enterPiPJS) { _, error in
+            if let error { NSLog("Rune PiP enter failed: %@", error.localizedDescription) }
+        }
+    }
+
+    /// Bring a PiP'd video back into the page (used when its tab is reselected).
+    func exitPiPIfActive() {
+        webView.evaluateJavaScript(Self.exitPiPJS) { _, error in
+            if let error { NSLog("Rune PiP exit failed: %@", error.localizedDescription) }
+        }
+    }
+
+    /// Manual toggle: exit if a video is in PiP, otherwise send one there.
+    /// Unlike the automatic path, a paused video qualifies too, and the outcome
+    /// is logged — a manual toggle that does nothing is worth diagnosing.
+    func togglePiP() {
         webView.evaluateJavaScript("""
-        (function(){const v=[...document.querySelectorAll('video')].find(v=>!v.paused&&!v.ended&&v.readyState>2);
-        if(v&&document.pictureInPictureEnabled&&!document.pictureInPictureElement){v.requestPictureInPicture().catch(()=>{});}})();
-        """)
+        (function(){
+          const vids=[...document.querySelectorAll('video')];
+          const active=vids.find(v=>v.webkitPresentationMode==='picture-in-picture');
+          if(active){active.webkitSetPresentationMode('inline');return 'exited';}
+          if(document.pictureInPictureElement){document.exitPictureInPicture().catch(e=>{});return 'exited';}
+          const v=vids.find(v=>!v.paused&&!v.ended&&v.readyState>2)||vids.find(v=>v.readyState>2);
+          if(!v){return 'no-video';}
+          if(v.webkitSupportsPresentationMode&&v.webkitSupportsPresentationMode('picture-in-picture')){
+            v.webkitSetPresentationMode('picture-in-picture');return 'entered';
+          }
+          if(document.pictureInPictureEnabled&&v.requestPictureInPicture){
+            v.requestPictureInPicture().catch(e=>{});return 'entered';
+          }
+          return 'unsupported';
+        })();
+        """) { result, error in
+            if let error { NSLog("Rune PiP toggle failed: %@", error.localizedDescription) }
+            else { NSLog("Rune PiP toggle: %@", result as? String ?? "?") }
+        }
     }
 }
 
@@ -110,6 +197,8 @@ final class BrowserModel: ObservableObject {
     @Published var openTabs: [UUID: Tab] = [:]     // savedID -> live tab
     @Published var selection: Selection?
     @Published var sidebarVisible = true
+    /// Batch-collect candidates; non-nil presents the collect sheet.
+    @Published var collectCandidates: [CollectCandidate]?
 
     static let maxFavorites = 6
 
@@ -118,82 +207,297 @@ final class BrowserModel: ObservableObject {
     let history: HistoryStore
     let shortcuts: ShortcutStore
     let claude: ClaudeService
+    let finder: FinderStore
+    let downloads: DownloadStore
+    let zoomLevels: ZoomStore
+
+    /// A private window: nothing it does touches the disk. Its web views share
+    /// no cookies or cache with the rest of Rune, its pages never reach
+    /// history, and it starts with no favorites or pinned tabs to leak.
+    let isPrivate: Bool
+
     private lazy var coordinator = WebCoordinator(model: self)
 
     private struct Persisted: Codable { var favorites: [SavedTab]; var pinned: [SavedTab]; var folders: [Folder] }
 
-    init(settings: SettingsStore, history: HistoryStore, shortcuts: ShortcutStore, claude: ClaudeService) {
-        self.settings = settings; self.history = history; self.shortcuts = shortcuts; self.claude = claude
+    init(settings: SettingsStore, history: HistoryStore, shortcuts: ShortcutStore,
+         claude: ClaudeService, finder: FinderStore, downloads: DownloadStore,
+         zoomLevels: ZoomStore, isPrivate: Bool = false) {
+        self.settings = settings; self.history = history; self.shortcuts = shortcuts
+        self.claude = claude; self.finder = finder; self.downloads = downloads
+        self.zoomLevels = zoomLevels; self.isPrivate = isPrivate
         let config = WKWebViewConfiguration()
-        config.websiteDataStore = .default()
+        config.websiteDataStore = isPrivate ? .nonPersistent() : .default()
         config.defaultWebpagePreferences.allowsContentJavaScript = true
         config.preferences.isElementFullscreenEnabled = true
         config.preferences.setValue(true, forKey: "allowsPictureInPictureMediaPlayback")
         self.configuration = config
 
-        if let saved = Storage.loadJSON(Persisted.self, from: "tabs.json") {
+        if !isPrivate, let saved = Storage.loadJSON(Persisted.self, from: "tabs.json") {
             favorites = saved.favorites; pinned = saved.pinned; folders = saved.folders
         }
 
         // Claude's page bridge — link hovers and selections.
-        config.userContentController.addUserScript(PageBridge.userScript)
+        config.userContentController.addUserScript(PageBridge.userScript(
+            hoverDelayMs: Int(settings.linkHoverDelay * 1000), hoverEnabled: settings.linkHoverEnabled))
         config.userContentController.add(coordinator, name: PageBridge.handlerName)
+
+        hoverObserver = NotificationCenter.default.addObserver(
+            forName: .hoverSettingsChanged, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.applyHoverSettings() }
+        }
     }
 
+    private var hoverObserver: (any NSObjectProtocol)?
+
+    /// Every live web view this window owns.
+    var allTabs: [Tab] { sessionTabs + Array(openTabs.values) }
+
+    /// Push changed hover settings to future pages (rebuilt user script) and to
+    /// every live page (window globals the script reads at event time).
+    private func applyHoverSettings() {
+        configuration.userContentController.removeAllUserScripts()
+        configuration.userContentController.addUserScript(PageBridge.userScript(
+            hoverDelayMs: Int(settings.linkHoverDelay * 1000), hoverEnabled: settings.linkHoverEnabled))
+        let js = "window.__runeHoverMs = \(Int(settings.linkHoverDelay * 1000));"
+            + "window.__runeHoverOff = \(settings.linkHoverEnabled ? "false" : "true");"
+        for tab in allTabs { tab.webView.evaluateJavaScript(js) }
+    }
+
+    /// tabs.json carries every saved favicon, so it is not a cheap write — and
+    /// the things that call this arrive in bursts (dragging a folder's colour
+    /// picker, reordering rows). Coalesce them; AppDelegate flushes on quit.
+    /// Same bargain as history: at most a second of changes at risk on a crash.
+    private var saveTask: Task<Void, Never>?
+
     func persist() {
+        guard !isPrivate else { return }
+        saveTask?.cancel()
+        saveTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            self?.flush()
+        }
+    }
+
+    func flush() {
+        saveTask?.cancel(); saveTask = nil
+        guard !isPrivate else { return }
         Storage.saveJSON(Persisted(favorites: favorites, pinned: pinned, folders: folders), to: "tabs.json")
     }
 
     // MARK: Live tab lookup
 
-    var activeTab: Tab? {
+    var activeTab: Tab? { selection.flatMap(tab(for:)) }
+
+    func tab(for selection: Selection) -> Tab? {
         switch selection {
-        case .session(let id): return sessionTabs.first { $0.id == id }
-        case .saved(let id): return openTabs[id]
-        case nil: return nil
+        case .session(let id): sessionTabs.first { $0.id == id }
+        case .saved(let id): openTabs[id]
         }
     }
 
     private func makeWebView(configuration: WKWebViewConfiguration? = nil) -> WKWebView {
-        let webView = WKWebView(frame: .zero, configuration: configuration ?? self.configuration)
+        let webView = RuneWebView(frame: .zero, configuration: configuration ?? self.configuration)
         webView.navigationDelegate = coordinator
         webView.uiDelegate = coordinator
+        webView.onSaveToFinder = { [weak self, weak webView] url, _ in
+            self?.saveToFinder(assetURL: url, from: webView)
+        }
         return webView
+    }
+
+    // MARK: Finder capture
+
+    /// The one save path every capture flow funnels through: download, toast,
+    /// optional Claude auto-tagging.
+    func saveToFinder(assetURL: URL, from webView: WKWebView?, tags: [String] = [], quiet: Bool = false) {
+        // Saving the same asset twice shouldn't clone it.
+        if finder.items.contains(where: { $0.assetURL == assetURL.absoluteString }) {
+            if !quiet { NotificationCenter.default.post(name: .finderToast, object: "Already in Finder") }
+            return
+        }
+        let source = webView?.url?.absoluteString ?? ""
+        let title = webView?.title ?? ""
+        Task { @MainActor in
+            do {
+                let item = try await finder.save(assetURL: assetURL, sourceURL: source,
+                                                 sourceTitle: title, tags: tags)
+                if !quiet { NotificationCenter.default.post(name: .finderToast, object: "Saved to Finder") }
+                if settings.finderAutoTag {
+                    let claude = self.claude, finder = self.finder
+                    Task { await finder.autoTag(item, using: claude) }
+                }
+            } catch {
+                if !quiet {
+                    NotificationCenter.default.post(name: .finderToast,
+                                                    object: "Couldn't save — \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    /// ⌥S: save whatever image/video sits under the cursor right now.
+    func saveMediaUnderCursor() {
+        guard let tab = activeTab else { return }
+        tab.webView.evaluateJavaScript("JSON.stringify(window.__runeMedia ? window.__runeMedia() : null)") { [weak self, weak tab] result, _ in
+            guard let json = result as? String, json != "null",
+                  let data = json.data(using: .utf8),
+                  let info = try? JSONDecoder().decode([String: String].self, from: data),
+                  let src = info["src"], let url = URL(string: src) else {
+                Task { @MainActor in
+                    NotificationCenter.default.post(name: .finderToast, object: "No image under the cursor")
+                }
+                return
+            }
+            Task { @MainActor in self?.saveToFinder(assetURL: url, from: tab?.webView) }
+        }
+    }
+
+    /// ⇧⌘S: scan the page and open the batch-collect sheet. Retries once —
+    /// invoked right after navigation, images may not have loaded yet.
+    func collectFromPage(retried: Bool = false) {
+        guard let tab = activeTab else { return }
+        tab.webView.evaluateJavaScript(PageBridge.collectMediaJS) { [weak self] result, _ in
+            guard let json = result as? String, let data = json.data(using: .utf8),
+                  let found = try? JSONDecoder().decode([CollectCandidate].self, from: data) else { return }
+            Task { @MainActor in
+                guard let self else { return }
+                let min = Int(self.settings.finderMinCollectSize)
+                let kept = found.filter { $0.w == 0 || ($0.w >= min && $0.h >= min) }
+                if kept.isEmpty {
+                    if retried {
+                        NotificationCenter.default.post(name: .finderToast, object: "Nothing collectable on this page")
+                    } else {
+                        try? await Task.sleep(for: .seconds(1.5))
+                        self.collectFromPage(retried: true)
+                    }
+                } else {
+                    self.collectCandidates = kept
+                }
+            }
+        }
+    }
+
+    /// Capture the visible page as an image item.
+    func capturePage() {
+        guard let tab = activeTab else { return }
+        tab.webView.takeSnapshot(with: nil) { [weak self, weak tab] image, _ in
+            guard let self, let tab, let image, let png = image.png else { return }
+            Task { @MainActor in
+                let name = tab.title.isEmpty ? "Page Capture" : tab.title
+                if (try? await self.finder.save(data: png, ext: "png", fileName: name,
+                                                sourceURL: tab.urlString, sourceTitle: tab.title)) != nil {
+                    NotificationCenter.default.post(name: .finderToast, object: "Captured page to Finder")
+                }
+            }
+        }
     }
 
     // MARK: Session tabs
 
+    /// Tabs you've closed this session, newest last. ⇧⌘T pops it, and the
+    /// "last closed" new-tab behavior reads the top.
+    private(set) var closedURLs: [String] = []
+    private static let maxClosed = 25
+
+    var lastClosedURL: String? { closedURLs.last }
+
+    private func rememberClosed(_ url: URL?) {
+        // A private window leaves no trail, not even an undo stack.
+        guard !isPrivate, let url, url.scheme?.hasPrefix("http") == true else { return }
+        closedURLs.append(url.absoluteString)
+        if closedURLs.count > Self.maxClosed { closedURLs.removeFirst() }
+    }
+
+    /// ⇧⌘T — bring back the tab you just closed, then the one before it.
+    func undoCloseTab() {
+        guard let url = closedURLs.popLast().flatMap(URL.init(string:)) else { return }
+        newTab(url: url)
+    }
+
     @discardableResult
     func newTab(url: URL? = nil, select: Bool = true) -> Tab {
+        // ⌘T with a start page already open focuses it instead of stacking blanks.
+        if url == nil, settings.newTabBehavior == .startPage,
+           let empty = sessionTabs.first(where: { $0.urlString.isEmpty && !$0.isLoading }) {
+            if select { self.select(.session(empty.id)) }
+            NotificationCenter.default.post(name: .focusStartPage, object: self)
+            return empty
+        }
         let tab = Tab(webView: makeWebView())
-        sessionTabs.append(tab)
-        if let url { tab.load(url) }
+        let target = url ?? defaultNewTabURL()
+        insertSession(tab)
+        if let target { tab.load(target) }
         if select { self.select(.session(tab.id)) }
         return tab
     }
 
-    func adoptPopup(configuration: WKWebViewConfiguration) -> WKWebView {
+    private func defaultNewTabURL() -> URL? {
+        switch settings.newTabBehavior {
+        case .startPage: nil
+        case .homePage: resolve(settings.homePageURL)
+        case .duplicateCurrent: activeTab?.webView.url
+        case .lastClosed: lastClosedURL.flatMap { URL(string: $0) }
+        }
+    }
+
+    private func insertSession(_ tab: Tab) {
+        if settings.newTabPlacement == .nextToActive,
+           case .session(let id)? = selection,
+           let i = sessionTabs.firstIndex(where: { $0.id == id }) {
+            sessionTabs.insert(tab, at: i + 1)
+        } else {
+            sessionTabs.append(tab)
+        }
+    }
+
+    func adoptPopup(configuration: WKWebViewConfiguration, select: Bool = true) -> WKWebView {
         let webView = makeWebView(configuration: configuration)
         let tab = Tab(webView: webView)
-        sessionTabs.append(tab)
-        select(.session(tab.id))
+        insertSession(tab)
+        if select { self.select(.session(tab.id)) }
         return webView
+    }
+
+    // MARK: Session restore
+
+    /// Session tabs are ephemeral by design; this is the opt-in that carries
+    /// them over a quit. Only addresses are kept — a restored tab loads fresh.
+    func persistSession() {
+        guard !isPrivate else { return }
+        guard settings.restoreSession else { Storage.remove("session.json"); return }
+        Storage.saveJSON(sessionTabs.compactMap { $0.webView.url?.absoluteString }, to: "session.json")
+    }
+
+    /// Reopen last launch's tabs. False when there was nothing to restore, so
+    /// the caller can fall back to opening a fresh tab.
+    @discardableResult
+    func restoreSession() -> Bool {
+        guard !isPrivate, settings.restoreSession,
+              let urls = Storage.loadJSON([String].self, from: "session.json")
+        else { return false }
+        for url in urls.compactMap(URL.init(string:)) { newTab(url: url, select: false) }
+        guard let first = sessionTabs.first else { return false }
+        select(.session(first.id))
+        return true
     }
 
     // MARK: Selection
 
     func select(_ new: Selection) {
-        if let current = activeTab { current.requestPiPIfPlaying() }
+        guard new != selection else { return }
+        if settings.autoPiP != .off, let current = activeTab { current.requestPiPIfPlaying() }
         if case .saved(let id) = new, openTabs[id] == nil, let saved = savedTab(id) {
             let tab = Tab(webView: makeWebView())
             tab.savedID = id
             tab.customName = saved.customName ? saved.name : nil
-            tab.colorHex = saved.colorHex
             if let png = saved.faviconPNG { tab.favicon = NSImage(data: png) }
             openTabs[id] = tab
             if let url = URL(string: saved.url) { tab.load(url) }
         }
         selection = new
+        if settings.autoPiPReturnInline { activeTab?.exitPiPIfActive() }
     }
 
     func savedTab(_ id: UUID) -> SavedTab? {
@@ -203,7 +507,9 @@ final class BrowserModel: ObservableObject {
     // MARK: Close / unload
 
     func close(session tab: Tab) {
+        rememberClosed(tab.webView.url)
         tab.webView.stopLoading()
+        tab.webView.closeAllMediaPresentations {}   // don't leak a PiP window
         sessionTabs.removeAll { $0.id == tab.id }
         if selection == .session(tab.id) {
             selection = sessionTabs.last.map { .session($0.id) } ?? pinned.first.map { .saved($0.id) }
@@ -218,9 +524,11 @@ final class BrowserModel: ObservableObject {
         }
     }
 
-    /// Unload a saved entry's live tab (keeps the row).
+    /// Unload a saved entry's live tab (keeps the row). Deliberately not on the
+    /// undo stack — the row is still in the sidebar, so nothing was lost.
     func unload(savedID: UUID) {
         openTabs[savedID]?.webView.stopLoading()
+        openTabs[savedID]?.webView.closeAllMediaPresentations {}   // don't leak a PiP window
         openTabs[savedID] = nil
         if selection == .saved(savedID) { selection = nil }
     }
@@ -232,7 +540,7 @@ final class BrowserModel: ObservableObject {
     func addFavorite(from tab: Tab) {
         guard canAddFavorite, let url = tab.webView.url else { return }
         let saved = SavedTab(url: url.absoluteString, name: tab.displayName,
-                             colorHex: tab.colorHex, faviconPNG: tab.favicon?.png)
+                             faviconPNG: tab.favicon?.png)
         favorites.append(saved)
         rebind(tab, to: saved.id); persist()
     }
@@ -240,7 +548,7 @@ final class BrowserModel: ObservableObject {
     func pin(_ tab: Tab) {
         guard let url = tab.webView.url else { return }
         let saved = SavedTab(url: url.absoluteString, name: tab.displayName,
-                             colorHex: tab.colorHex, faviconPNG: tab.favicon?.png)
+                             faviconPNG: tab.favicon?.png)
         pinned.append(saved)
         rebind(tab, to: saved.id); persist()
     }
@@ -274,6 +582,10 @@ final class BrowserModel: ObservableObject {
         guard let i = folders.firstIndex(where: { $0.id == id }) else { return }
         folders[i].icon = icon; persist()
     }
+    func setFolderColor(_ id: UUID, _ hex: String?) {
+        guard let i = folders.firstIndex(where: { $0.id == id }) else { return }
+        folders[i].colorHex = hex; persist()
+    }
     func deleteFolder(_ id: UUID) {
         for i in pinned.indices where pinned[i].folderID == id { pinned[i].folderID = nil }
         folders.removeAll { $0.id == id }; persist()
@@ -294,14 +606,6 @@ final class BrowserModel: ObservableObject {
         case .saved(let id):
             updateSaved(id) { $0.name = trimmed.isEmpty ? $0.name : trimmed; $0.customName = !trimmed.isEmpty }
             openTabs[id]?.customName = trimmed.isEmpty ? nil : trimmed
-        }
-    }
-    func setColor(_ hex: String?, for selection: Selection) {
-        switch selection {
-        case .session(let id): sessionTabs.first { $0.id == id }?.colorHex = hex
-        case .saved(let id):
-            updateSaved(id) { $0.colorHex = hex }
-            openTabs[id]?.colorHex = hex
         }
     }
     // MARK: Drag & drop
@@ -352,7 +656,7 @@ final class BrowserModel: ObservableObject {
                   let url = tab.webView.url else { return nil }
             let saved = SavedTab(url: url.absoluteString, name: tab.displayName,
                                  customName: tab.customName != nil,
-                                 colorHex: tab.colorHex, faviconPNG: tab.favicon?.png)
+                                 faviconPNG: tab.favicon?.png)
             sessionTabs.removeAll { $0.id == tab.id }
             tab.savedID = saved.id
             openTabs[saved.id] = tab
@@ -394,7 +698,9 @@ final class BrowserModel: ObservableObject {
 
     func updateFavicon(_ image: NSImage, for tab: Tab) {
         tab.favicon = image
-        if let savedID = tab.savedID { updateSaved(savedID) { $0.faviconPNG = image.png } }
+        guard let savedID = tab.savedID, let png = image.png,
+              savedTab(savedID)?.faviconPNG != png else { return }   // skip a tabs.json write when unchanged
+        updateSaved(savedID) { $0.faviconPNG = png }
     }
 
     // MARK: Navigation
@@ -407,7 +713,58 @@ final class BrowserModel: ObservableObject {
     func goBack() { activeTab?.webView.goBack() }
     func goForward() { activeTab?.webView.goForward() }
     func reload() { activeTab?.webView.reload() }
-    func recordVisit(_ url: URL, title: String) { history.record(url: url, title: title) }
+    func recordVisit(_ url: URL, title: String) {
+        guard !isPrivate else { return }
+        history.record(url: url, title: title)
+    }
+
+    // MARK: Zoom
+
+    /// ⌘+ / ⌘− / ⌘0. The level belongs to the site rather than the tab, so
+    /// every open tab on that host moves together and the next visit remembers.
+    func zoom(_ change: ZoomChange) {
+        guard let host = activeTab?.webView.url?.host else { return }
+        zoomLevels.set(change.applied(to: zoomLevels.level(for: host)), for: host)
+        for tab in allTabs where tab.webView.url?.host == host { applyZoom(to: tab) }
+    }
+
+    /// Put a tab at its site's remembered level. Called on every commit, so it
+    /// has to no-op cheaply for the overwhelmingly common 100% case.
+    func applyZoom(to tab: Tab) {
+        let level = tab.webView.url?.host.map { zoomLevels.level(for: $0) } ?? 1
+        if abs(tab.webView.pageZoom - level) > 0.001 { tab.webView.pageZoom = level }
+    }
+
+    // MARK: Page actions
+
+    /// The address behind a sidebar row, loaded or not — a pinned tab knows
+    /// where it points before you ever open it.
+    func url(for selection: Selection) -> String? {
+        if let live = tab(for: selection)?.webView.url { return live.absoluteString }
+        if case .saved(let id) = selection { return savedTab(id)?.url }
+        return nil
+    }
+
+    /// ⇧⌘C — the current address on the clipboard.
+    func copyURL() {
+        if let url = activeTab?.webView.url?.absoluteString { copy(url) }
+    }
+
+    func copy(_ url: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url, forType: .string)
+        NotificationCenter.default.post(name: .finderToast, object: "Copied link")
+    }
+
+    /// ⌘P. "Save as PDF" lives inside the system print panel, so this one
+    /// command covers printing and exporting both.
+    func printPage() {
+        guard let tab = activeTab, let window = NSApp.keyWindow else { return }
+        let operation = tab.webView.printOperation(with: NSPrintInfo.shared)
+        operation.printPanel.options.insert([.showsPaperSize, .showsOrientation, .showsScaling])
+        operation.view?.frame = tab.webView.bounds
+        operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+    }
 
     func selectAdjacentSession(_ delta: Int) {
         guard !sessionTabs.isEmpty else { return }
@@ -451,6 +808,13 @@ final class BrowserModel: ObservableObject {
         if text.hasPrefix("http://") || text.hasPrefix("https://") { return URL(string: text) }
         return URL(string: "https://\(text)")
     }
+}
+
+extension Notification {
+    /// Overlays (the palette, the find bar, the downloads list) live inside a
+    /// BrowserView and are asked for by broadcast. The sender names the model
+    /// it meant, so a second browser window ignores what wasn't for it.
+    func aimed(at model: BrowserModel) -> Bool { (object as? BrowserModel) === model }
 }
 
 extension NSImage {

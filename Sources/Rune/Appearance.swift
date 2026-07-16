@@ -23,10 +23,66 @@ struct Appearance: Codable, Equatable {
     var cornerRadius: Double = 8
     var sidebarOnRight = false
 
+    // Toolbar
+    /// Command rawValues shown as toolbar buttons, in order, before the
+    /// address bar. Any command works — the button dispatches it.
+    var toolbarButtons: [String] = ["toggleSidebar", "goBack", "goForward", "reload", "showDownloads"]
+    /// Show just the site's host in the address bar until you click it.
+    var compactAddressBar = true
+
+    // Start page
+    var startPageGreeting = ""          // empty = the "Rune" wordmark
+    var startPageShowFavorites = true
+    var startPageShowRecents = false
+    var startPageBackground = "system"  // color token; "system" follows the window background
+
     // Window
     var hideTrafficLights = false
 
+    // App icon: "default" = the bundled Icon Composer icon; a hex on either
+    // token switches to a natively-rendered variant (see AppIconRenderer).
+    var appIconBackground = "default"
+    var appIconGlyph = "default"
+
     static let `default` = Appearance()
+
+    // Decode with a default for every missing key, so adding a knob never
+    // resets anyone's saved appearance.json / presets / .runetheme files.
+    enum CodingKeys: String, CodingKey {
+        case accent, sidebarColor, chromeColor, backgroundColor
+        case fontName, fontSize, textColor
+        case sidebarWidth, cornerRadius, sidebarOnRight
+        case toolbarButtons, compactAddressBar
+        case startPageGreeting, startPageShowFavorites, startPageShowRecents, startPageBackground
+        case hideTrafficLights
+        case appIconBackground, appIconGlyph
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = Appearance.default
+        accent = try c.decodeIfPresent(String.self, forKey: .accent) ?? d.accent
+        sidebarColor = try c.decodeIfPresent(String.self, forKey: .sidebarColor) ?? d.sidebarColor
+        chromeColor = try c.decodeIfPresent(String.self, forKey: .chromeColor) ?? d.chromeColor
+        backgroundColor = try c.decodeIfPresent(String.self, forKey: .backgroundColor) ?? d.backgroundColor
+        fontName = try c.decodeIfPresent(String.self, forKey: .fontName) ?? d.fontName
+        fontSize = try c.decodeIfPresent(Double.self, forKey: .fontSize) ?? d.fontSize
+        textColor = try c.decodeIfPresent(String.self, forKey: .textColor) ?? d.textColor
+        sidebarWidth = try c.decodeIfPresent(Double.self, forKey: .sidebarWidth) ?? d.sidebarWidth
+        cornerRadius = try c.decodeIfPresent(Double.self, forKey: .cornerRadius) ?? d.cornerRadius
+        sidebarOnRight = try c.decodeIfPresent(Bool.self, forKey: .sidebarOnRight) ?? d.sidebarOnRight
+        toolbarButtons = try c.decodeIfPresent([String].self, forKey: .toolbarButtons) ?? d.toolbarButtons
+        compactAddressBar = try c.decodeIfPresent(Bool.self, forKey: .compactAddressBar) ?? d.compactAddressBar
+        startPageGreeting = try c.decodeIfPresent(String.self, forKey: .startPageGreeting) ?? d.startPageGreeting
+        startPageShowFavorites = try c.decodeIfPresent(Bool.self, forKey: .startPageShowFavorites) ?? d.startPageShowFavorites
+        startPageShowRecents = try c.decodeIfPresent(Bool.self, forKey: .startPageShowRecents) ?? d.startPageShowRecents
+        startPageBackground = try c.decodeIfPresent(String.self, forKey: .startPageBackground) ?? d.startPageBackground
+        hideTrafficLights = try c.decodeIfPresent(Bool.self, forKey: .hideTrafficLights) ?? d.hideTrafficLights
+        appIconBackground = try c.decodeIfPresent(String.self, forKey: .appIconBackground) ?? d.appIconBackground
+        appIconGlyph = try c.decodeIfPresent(String.self, forKey: .appIconGlyph) ?? d.appIconGlyph
+    }
 }
 
 struct ThemePreset: Codable, Identifiable, Equatable {
@@ -45,9 +101,22 @@ final class AppearanceStore: ObservableObject {
         presets = Storage.loadJSON([ThemePreset].self, from: "presets.json") ?? Self.builtIns
     }
 
+    // The notification (window chrome, app icon) fires immediately; the disk
+    // write is debounced so dragging a slider doesn't write a file per tick.
+    // AppDelegate flushes on quit.
+    private var saveTask: Task<Void, Never>?
     private func persist() {
-        Storage.saveJSON(appearance, to: "appearance.json")
         NotificationCenter.default.post(name: .appearanceChanged, object: nil)
+        saveTask?.cancel()
+        saveTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            self?.flush()
+        }
+    }
+    func flush() {
+        saveTask?.cancel(); saveTask = nil
+        Storage.saveJSON(appearance, to: "appearance.json")
     }
 
     // MARK: Presets
@@ -82,12 +151,18 @@ final class AppearanceStore: ObservableObject {
 
     static let builtIns: [ThemePreset] = [
         ThemePreset(name: "Rune Mint", appearance: .default),
-        ThemePreset(name: "Graphite", appearance: Appearance(
-            accent: "#8E8E93", sidebarColor: "#1C1C1E", chromeColor: "#2C2C2E",
-            backgroundColor: "#000000", cornerRadius: 6)),
-        ThemePreset(name: "Paper", appearance: Appearance(
-            accent: "#C0704B", sidebarColor: "#F2EEE6", chromeColor: "#FBF8F2",
-            backgroundColor: "#FFFDF8", fontName: "Georgia", cornerRadius: 10)),
+        ThemePreset(name: "Graphite", appearance: {
+            var a = Appearance()
+            a.accent = "#8E8E93"; a.sidebarColor = "#1C1C1E"; a.chromeColor = "#2C2C2E"
+            a.backgroundColor = "#000000"; a.cornerRadius = 6
+            return a
+        }()),
+        ThemePreset(name: "Paper", appearance: {
+            var a = Appearance()
+            a.accent = "#C0704B"; a.sidebarColor = "#F2EEE6"; a.chromeColor = "#FBF8F2"
+            a.backgroundColor = "#FFFDF8"; a.fontName = "Georgia"; a.cornerRadius = 10
+            return a
+        }()),
     ]
 
     // MARK: Derived values used by the UI
@@ -99,6 +174,7 @@ final class AppearanceStore: ObservableObject {
     var sidebarBG: Color { color(appearance.sidebarColor, fallback: Color(nsColor: .windowBackgroundColor)) }
     var chrome: Color { color(appearance.chromeColor, fallback: Color(nsColor: .textBackgroundColor)) }
     var windowBG: Color { color(appearance.backgroundColor, fallback: Color(nsColor: .windowBackgroundColor)) }
+    var startPageBG: Color { color(appearance.startPageBackground, fallback: windowBG) }
     var hairline: Color { Color.primary.opacity(0.08) }
     var selection: Color { accent.opacity(0.16) }
     var hover: Color { Color.primary.opacity(0.05) }

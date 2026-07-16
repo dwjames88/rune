@@ -72,7 +72,8 @@ signed in. **Anthropic API key is in the macOS Keychain** (`com.dwjames.Rune` /
 | `Claude.swift` | `ClaudeService` (raw HTTP Messages API) + `Keychain` |
 | `ClaudeUI.swift` | Link hover popover, selection actions, Ask bar (⌘J), summary cache |
 | `PageBridge.swift` | Injected JS (link hover + selection), page-text extraction, HTML→text fetcher |
-| `Theme.swift` | Legacy static tokens — **only** `CommandPalette` still uses these. Migrate it to `AppearanceStore` when convenient. |
+| `FinderView.swift` | Finder window: rail/grid/inspector, collect sheet, `FinderWindowController` |
+| `Finder.swift` | `FinderStore`, item model, save pipeline, `RuneWebView` capture |
 
 ## 5. Feature state
 
@@ -82,10 +83,28 @@ Session tabs · drag & drop (reorder, into folders, drag-to-pin/favorite) · per
 color · SF Symbol folder icons · favicons · command palette (⌘K) · shortcut remapping ·
 auto-predict address bar · native blank start page · persistent login + history · custom search
 engine · deep appearance customization + shareable `.runetheme` presets · WCAG auto-contrast ·
-hide traffic lights · code signing.
+hide traffic lights · code signing · **Auto-PiP** (verified 2026-07-14: enter on tab switch,
+return-inline on switch back, manual ⌥⌘P toggle, no PiP leak on tab close) · **app icon**
+(dev-run.sh compiles `Assets/Rune.icon` with **actool** → `Assets.car` + legacy `Rune.icns`
++ `CFBundleIconName`; sips/iconutil PNG fallback if actool is missing) · **custom app icon
+setting** (Appearance ▸ App Icon: `AppIconRenderer` draws the rune glyph polygon natively in
+any colors, applied via `NSApp.applicationIconImage`, off = bundled icon — verified in Dock) · **new-tab flow** (behavior: start page /
+home / duplicate / last closed; placement: end / next-to-active; ⌘T focuses an existing start
+page instead of stacking — verified) · **customizable start page** (greeting, favorites grid,
+recents, background — in `Appearance`, round-trips presets) · **customizable toolbar**
+(`Appearance.toolbarButtons` = command rawValues rendered as dispatch buttons — verified live)
+· **compact address bar** (host-only until clicked — verified) · **window restores last
+size, clamped to 900×600 min** (`NSHostingController.sizingOptions = []` was the fix for the
+tiny-launch-window bug: SwiftUI was shrinking the window to its ideal size, and that frame
+got autosaved).
 
-**Built but NOT verified** (needs the owner's Anthropic API key in Settings ▸ Claude):
-all four Claude features — link hover summaries, Ask (⌘J), selection actions, AI address bar.
+**Claude features — all four verified on-device 2026-07-14** (owner's API key is in the
+Keychain): link hover summaries · selection Explain/Summarize/Translate · Ask bar (⌘J,
+streams, answers honestly when the page lacks the answer) · AI address bar ("that yeti
+enduro bike review" → found and opened the right history page). Also shipped + verified:
+**configurable hover delay** (Settings ▸ Claude ▸ Link Previews: on/off + 0.1–2.0 s slider;
+baked into the injected PageBridge script for new pages, pushed live to open pages via
+`window.__runeHoverMs` / `__runeHoverOff` — see `BrowserModel.applyHoverSettings`).
 
 **Not started:** Apple Passwords (needs the AutoFill Credential Provider entitlement — likely
 requires a **paid** Apple Developer Program membership; confirm enrollment before starting).
@@ -105,62 +124,60 @@ requires a **paid** Apple Developer Program membership; confirm enrollment befor
   anything that calls the API.
 - **Screenshots:** `screencapture -o -x /tmp/x.png` from Bash works and bypasses compositor
   filtering; `sips -c H W --cropOffset Y X` to crop.
+- **⌘K never reaches Rune on the owner's machine** — some other utility owns it as a
+  global hotkey (verified with an event monitor: ⌘J arrives, ⌘K doesn't). Not a Rune
+  bug. The palette works via View ▸ Command Palette, or remap it in Settings ▸ Shortcuts.
+  Theme.swift is deleted — the palette is appearance-driven now.
+- **`open` (and dev-run.sh) reuses a running Rune instance** — you'll be looking at the old
+  build. Quit first: `osascript -e 'quit app id "com.dwjames.Rune"'` (window positioning via
+  System Events also works; only keystrokes are blocked).
+- **The PiP window belongs to the system `PIPAgent` process**, not Rune, so it's invisible in
+  filtered computer-use screenshots. Check it with: `tell application "System Events" to count
+  windows of (every process whose name is "PIPAgent")` — 1 = PiP active, 0 = not.
+- See `.claude/skills/verify/SKILL.md` for the full on-device verification recipe.
 
 ---
 
 ## 7. Next steps (in the owner's priority order)
 
-### A. Auto Picture-in-Picture — harden it
+### A. Auto Picture-in-Picture — ✅ DONE (2026-07-14, verified on-device)
 
-**Current state:** `Tab.requestPiPIfPlaying()` (in `Browser.swift`) is called on the *outgoing*
-tab from `BrowserModel.select(_:)`. It evaluates JS that finds a playing `<video>` and calls
-`requestPictureInPicture()`. The web view config also sets the private
-`preferences.setValue(true, forKey: "allowsPictureInPictureMediaPlayback")`.
+**Root cause was not user activation:** WebKit never implemented the W3C PiP API —
+`document.pictureInPictureEnabled` is `undefined` in WKWebView, so the old JS condition
+silently never fired. WebKit's real API is `video.webkitSetPresentationMode('picture-in-picture')`,
+which needs no gesture. `Tab` (Browser.swift) now uses it (W3C kept as fallback) and NSLogs
+each attempt's outcome.
 
-**Why it may not fire:** `HTMLVideoElement.requestPictureInPicture()` normally requires
-**transient user activation**. Switching tabs is not a gesture the page sees, so WebKit can
-reject the call. This has never been confirmed working — treat it as unproven.
+**Shipped:** Auto-PiP setting in Settings ▸ Browsing ▸ Media (`AutoPiPMode` in Stores.swift:
+off / tab switch / tab switch + leaving Rune, via `applicationDidResignActive`) · "return
+video to the page when you come back" toggle (`exitPiPIfActive` on select) · manual
+`togglePiP` Command (⌥⌘P, View menu) · `closeAllMediaPresentations` on tab close/unload
+(no PiP leak — verified). Possible later: per-site allowlist.
 
-**Suggested plan:**
-1. Reproduce: play a YouTube/Vimeo video, switch tabs, watch for a WebKit console error
-   (`NotAllowedError`). Add a temporary JS→Swift log through `PageBridge` to see the rejection.
-2. Try, in order: (a) the Document Picture-in-Picture API (`documentPictureInPicture.requestWindow()`),
-   (b) invoking PiP from inside a real user-gesture handler and keeping the handle, (c) WebKit's
-   own media controls / `_WKWebView` SPI if a supported path doesn't exist.
-3. Expose it as a setting (`Appearance` or a new `Behavior` struct): **Auto-PiP: off / on tab
-   switch / on window blur**, plus a per-site allowlist later.
-4. Also wire `webView.closeAllMediaPresentations()` when a tab is closed so PiP windows don't leak.
+### B. New tab flow — ✅ DONE (2026-07-14, verified on-device)
 
-### B. New tab flow
+Shipped: `NewTabBehavior` + `NewTabPlacement` in Stores.swift, surfaced in
+Settings ▸ Browsing ▸ New Tabs · `lastClosedURL` tracked on close/unload · ⌘T focuses an
+existing empty start page (`.focusStartPage` notification) instead of stacking · start page
+customization (greeting, favorites grid, recents, background) via `Appearance` fields.
 
-**Current state:** `BrowserModel.newTab()` creates a blank tab with **no URL**;
-`TabContent` shows the native `StartPage` (centered "Rune" + search field) whenever
-`urlString.isEmpty && !isLoading`. Deliberately does **not** load a third-party page.
+**Still open from B:** "open in split" and ⌘-click → background tab (popups always
+foreground — see `adoptPopup` in `Browser.swift`).
 
-**Where to take it (ask the owner to pick):**
-- New-tab behavior setting: blank start page / home URL / duplicate current / last closed.
-- Make the start page itself customizable: favorites grid, recent history, custom background
-  or color, layout density, optional greeting — all driven from `Appearance`/a new `StartPage`
-  config so it round-trips through presets.
-- New-tab **placement**: at end vs. next to active (there's already a Helium-era notion of this
-  in the owner's head — implement as a setting).
-- ⌘T while a start page is already open should focus it rather than pile up empty tabs.
-- Consider "open in split" and ⌘-click → background tab (currently popups always foreground —
-  see `adoptPopup` in `Browser.swift`).
+### C. More layout customization — toolbar part ✅ DONE (2026-07-14)
 
-### C. More layout customization
+Shipped: `Appearance.toolbarButtons` (any Command as a toolbar button, user-composable,
+verified live) · `compactAddressBar` (host-only display until clicked) · **Appearance now
+decodes with per-field defaults** (`init(from:)` with `decodeIfPresent`), so adding knobs
+never resets saved themes — but note the memberwise init is gone; build presets by mutating
+`var a = Appearance()`.
 
-**Current `Appearance` knobs:** accent, sidebar/toolbar/background colors, font family, font
-size, text color (auto-contrast or custom), sidebar width, corner radius, sidebar side,
-hide traffic lights.
-
-**Obvious next knobs:**
-- **Toolbar**: show/hide individual buttons, compact mode, centered address bar, hide toolbar
+**Remaining knob ideas:**
+- **Toolbar**: reorder buttons (currently check-order), centered address bar, hide toolbar
   entirely (zen).
 - **Sidebar**: row height/density, section order, hide a whole section (e.g. no Favorites),
   collapse-to-icons, auto-hide/overlay mode.
 - **Window**: background material/vibrancy, translucency, full-size content behavior.
-- **Start page**: see (B).
 - **Per-space theming** later, if spaces land.
 
 **How to add a knob (the pattern):** add the field to `Appearance` (Codable → it lands in
@@ -170,8 +187,66 @@ to `Command` instead so it gets a menu item + remappable shortcut automatically.
 
 ---
 
+### D2. Finder UI + capture flows — ✅ DONE (2026-07-15, verified on-device)
+
+`FinderView.swift`: the library is a **separate window** (`FinderWindowController`,
+frame-autosaved, ⌥⌘F toggles, sidebar button + **Finder menu**; ⌘W closes the
+window when it's key — see `dispatch(.closeTab)`; double-click fronts the browser
+window via `.frontBrowserWindow`) — rail (All/Images/Videos/Starred +
+folders CRUD + tag list), adaptive thumbnail grid (double-click opens source,
+context menu: reveal/star/trash), inspector (rename, 0–5 stars, tags, note,
+folder membership, custom key/value fields, dominant-color swatches, source
+link). Capture: ⌥S save-media-under-cursor (`window.__runeMedia`), ⇧⌘S batch
+collect (JS page scan → native sheet with live previews, min-size setting,
+shared tags), Capture Page (WKWebView.takeSnapshot). Optional **Claude
+auto-tag** (Settings ▸ Browsing ▸ Finder, off by default; text-context, effort
+low). Verified: grid/inspector edits persist to item.json, batch-collected 5
+tagged items from Pinkbike, tag filter works. **System-wide capture
+(2026-07-15, verified)**: macOS Service "Save to Rune Finder" (NSServices in the
+Info.plist heredocs of BOTH dev-run.sh and package.sh; `NSApp.servicesProvider`
++ `saveToRuneFinder(_:userData:error:)` in main.swift) takes files, copied
+images, URLs, and selected text from any app's right-click ▸ Services menu ·
+"Open With Rune"/dock drops import files (CFBundleDocumentTypes + 
+`application(_:open:)`; web URLs open as tabs) · drag anything onto the Finder
+window grid. Test recipe: NSPerformService("Save to Rune Finder", pboard) from
+`swift -e`. **Critical gotcha (cost hours): Finder's file context menu only
+renders services that declare `NSRequiredContext` → `NSServiceCategory`
+(e.g. public.item).** Plain NSSendTypes/NSSendFileTypes services register and
+execute (NSPerformService succeeds) but never appear in the menu — discovered
+by diffing against Supercharge's working declarations in `pbs -dump_pboard`.
+The service is declared twice under one title: files (NSServiceCategory +
+public.file-url) and data (text/png/url NSSendTypes) → saveToRuneFinder /
+saveToRuneFinderData. After plist changes: rebuild, `lsregister -f`, `pbs
+-flush && pbs -update`, `killall Finder`. A canonical copy is installed at
+/Applications/Rune.app (registration resolves there; service messages route to
+whichever Rune is running, so dev builds keep working). Remaining ideas: smart folders, drag-out
+capture, video thumbnails, full-page (paginated) capture.
+
+### D. Finder (inspiration library) — phase 1 ✅ DONE (2026-07-14, verified)
+
+See **`FINDER.md`** for the full spec (Eagle-style). Shipped and verified on-device:
+`Finder.swift` — `FinderStore` (library at `…/Rune/Finder/items/<uuid>/` with
+original + thumb.png + self-describing item.json, tolerant decoding), save
+pipeline (URLSession download with Referer, UTType kind detection, dimensions,
+dominant-color extraction, 512px thumbnail), `RuneWebView.willOpenMenu` adds
+**"Save Image/Video to Rune Finder"** (PageBridge posts the media element on
+`contextmenu`), toast feedback in ContentArea.
+
+**Next phases** (FINDER.md §3): Finder UI surface (grid + folders/tags rail +
+inspector) → batch collect + page capture → smart folders/custom fields UI →
+Claude auto-tagging. `FinderFolder` + `allTags` already exist in the store.
+
+### E. Figma component library — blocked on Figma MCP auth
+
+Owner wants the UI mirrored into
+<https://www.figma.com/design/Kmi2f7MKB8zKv209g9RXi4/Rune> as a component
+library (tokens → smallest components → composed screens) so they can rearrange
+in Figma. Blocked until the Figma connector is authorized (claude.ai connector
+settings). Load skills figma-use + figma-generate-library + figma-swiftui first.
+
 ## 8. Suggested first move in the new session
 
-Ask the owner whether they've put an API key in Settings ▸ Claude yet — if yes, verify the four
-Claude features actually work before adding anything new. Then start on Auto-PiP (A), since it's
-the only *committed* feature still unproven.
+Everything committed through the app-icon work is verified; Claude features are verified
+too. Pick up the remaining items in (B)/(C) above (⌘-click background tabs, split view,
+sidebar/window knobs, toolbar reorder), or Apple Passwords if Developer Program enrollment
+is sorted. Read `.claude/skills/verify/SKILL.md` before driving the app.
