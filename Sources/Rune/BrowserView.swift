@@ -1296,8 +1296,14 @@ private struct StartPage: View {
 
     private var a: Appearance { appearance.appearance }
     private var greeting: String { a.startPageGreeting.isEmpty ? "Rune" : a.startPageGreeting }
-    private var recents: [HistoryEntry] {
-        Array(model.history.entries.sorted { $0.lastVisited > $1.lastVisited }.prefix(6))
+    // Memoized on appear: a full history sort per keystroke in the search
+    // field is work the page can't even show.
+    @State private var recents: [HistoryEntry] = []
+
+    private func refreshRecents() {
+        guard a.startPageShowRecents else { return }
+        recents = Array(model.history.entries
+            .sorted { $0.lastVisited > $1.lastVisited }.prefix(6))
     }
 
     var body: some View {
@@ -1363,9 +1369,11 @@ private struct StartPage: View {
         }
         .padding(.horizontal, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity).background(appearance.startPageBG)
-        .onAppear { focused = true }
+        .onAppear { focused = true; refreshRecents() }
+        // ⌘T landing on a start page that's already open: same freshness as a
+        // new one.
         .onReceive(NotificationCenter.default.publisher(for: .focusStartPage)) {
-            if $0.aimed(at: model) { focused = true }
+            if $0.aimed(at: model) { focused = true; refreshRecents() }
         }
     }
 }

@@ -338,7 +338,10 @@ final class SettingsStore: ObservableObject {
         blockContent = saved?.blockContent ?? true
         hideCookieBanners = saved?.hideCookieBanners ?? true
     }
-    private func save() {
+    // The last store that still wrote on every didSet — typing a home page URL
+    // was a file write per keystroke. Same bargain as everywhere else now.
+    private lazy var writer = DebouncedWrite { [weak self] in
+        guard let self else { return }
         Storage.saveJSON(Payload(searchEngine: searchEngine, customEngines: customEngines,
                                  autoPiP: autoPiP, autoPiPReturnInline: autoPiPReturnInline,
                                  autoPiPAudibleOnly: autoPiPAudibleOnly,
@@ -353,6 +356,8 @@ final class SettingsStore: ObservableObject {
                                  hibernateAfter: hibernateAfter, archiveAfter: archiveAfter),
                          to: "settings.json")
     }
+    private func save() { writer.schedule() }
+    func flush() { writer.flush() }
     private func hoverChanged() {
         NotificationCenter.default.post(name: .hoverSettingsChanged, object: nil)
     }
@@ -403,6 +408,15 @@ final class HistoryStore: ObservableObject {
         }.prefix(limit).map { $0 }
     }
 
+    /// True when the URL is a site's front door — nothing after the host but
+    /// at most a bare slash. Same slicing diet as fastHost, same reason.
+    static func isRoot(_ url: String) -> Bool {
+        var s = Substring(url)
+        if let r = s.range(of: "://") { s = s[r.upperBound...] }
+        guard let slash = s.firstIndex(of: "/") else { return true }
+        return s[s.index(after: slash)...].isEmpty
+    }
+
     /// Host of a URL string by slicing — no URL/Foundation parsing. Runs for
     /// every history entry on every keystroke, so it has to be cheap.
     static func fastHost(of url: String) -> Substring {
@@ -427,7 +441,12 @@ final class HistoryStore: ObservableObject {
             let host = Self.fastHost(of: url)
 
             var base: Double
-            if host.hasPrefix(q) { base = 1000 }
+            // The whole host, typed out, is not a prefix you're guessing at:
+            // it names the site's front door, and no amount of visits to a
+            // deep link on it should outrank that. (The deep links share the
+            // exact host too, which is why the tier needs the root check.)
+            if host == q, Self.isRoot(url) { base = 1300 }
+            else if host.hasPrefix(q) { base = 1000 }
             else if title.hasPrefix(q) { base = 700 }
             else if host.contains(q) { base = 450 }
             else if title.contains(q) { base = 300 }
@@ -459,9 +478,21 @@ final class HistoryStore: ObservableObject {
 
     func clear() { entries = []; flush() }
 
+    /// Unbounded history is a slow address bar on a long timeline: predict()
+    /// touches every entry per keystroke. Trimmed with hysteresis — cut to
+    /// `keep` only after passing `cap` — so it isn't re-sorting on every visit.
+    private static let cap = 6000, keep = 5000
+
+    private func trimIfNeeded() {
+        guard entries.count > Self.cap else { return }
+        entries.sort { ($0.visitCount, $0.lastVisited) > ($1.visitCount, $1.lastVisited) }
+        entries.removeLast(entries.count - Self.keep)
+    }
+
     // Every page visit used to rewrite all of history.json.
     private lazy var writer = DebouncedWrite { [weak self] in
         guard let self else { return }
+        trimIfNeeded()
         Storage.saveJSON(entries, to: "history.json")
     }
     private func save() { writer.schedule() }

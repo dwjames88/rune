@@ -142,16 +142,29 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
         return model?.openTabs.values.first { $0.webView === webView }
     }
 
+    /// One favicon per host per session. A site declares the same icon on every
+    /// page, and refetching it over the network on each navigation is paying
+    /// for the same bytes on every click.
+    private var faviconsByHost: [String: NSImage] = [:]
+
     /// Grab the page's declared favicon (or /favicon.ico) and hand it to the model.
     private func fetchFavicon(for webView: WKWebView) {
+        if let host = webView.url?.host, let cached = faviconsByHost[host] {
+            if let tab = tab(for: webView) { model?.updateFavicon(cached, for: tab) }
+            return
+        }
         let js = "document.querySelector(\"link[rel~='icon']\")?.href || (location.origin + '/favicon.ico')"
         webView.evaluateJavaScript(js) { [weak self] result, _ in
             guard let self, let href = result as? String, let iconURL = URL(string: href),
                   let tab = self.tab(for: webView) else { return }
+            let host = webView.url?.host
             Task {
                 guard let (data, _) = try? await URLSession.shared.data(from: iconURL),
                       let image = NSImage(data: data) else { return }
-                await MainActor.run { self.model?.updateFavicon(image, for: tab) }
+                await MainActor.run {
+                    if let host { self.faviconsByHost[host] = image }
+                    self.model?.updateFavicon(image, for: tab)
+                }
             }
         }
     }

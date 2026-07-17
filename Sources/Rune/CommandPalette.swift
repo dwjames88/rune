@@ -24,6 +24,10 @@ struct CommandPalette: View {
     @State private var query = ""
     @State private var selection = 0
     @FocusState private var focused: Bool
+    // Memoized, same rationale as the address bar: recomputed once per
+    // keystroke, not on every body evaluation — arrow keys shouldn't
+    // re-search history.
+    @State private var items: [Item] = []
 
     enum Item: Identifiable {
         case command(Command)
@@ -39,7 +43,7 @@ struct CommandPalette: View {
         }
     }
 
-    private var items: [Item] {
+    private func computeItems() -> [Item] {
         var result: [Item] = []
         let q = query.trimmingCharacters(in: .whitespaces)
 
@@ -51,8 +55,21 @@ struct CommandPalette: View {
         }
 
         if !q.isEmpty {
-            result += model.history.search(q, limit: 5).map(Item.history)
-            result.append(.navigate(q))
+            if mode == .newTab {
+                // The same offers in the same order as the address bar — this
+                // IS one, in a different coat. Ranked history used to lead
+                // here, which sent "webkit.org" ⏎ to a blog post on it.
+                result += addressSuggestions(for: q, model: model).compactMap { s in
+                    switch s {
+                    case .navigate(let q): .navigate(q)
+                    case .history(let e): .history(e)
+                    case .askAI: nil   // the palette has no row for it
+                    }
+                }
+            } else {
+                result += model.history.predict(q, limit: 5).map(Item.history)
+                result.append(.navigate(q))
+            }
         } else if mode == .newTab {
             // An empty address bar still has somewhere to go.
             result += model.history.search("", limit: 8).map(Item.history)
@@ -78,7 +95,7 @@ struct CommandPalette: View {
                         .font(.title3)
                         .focused($focused)
                         .onSubmit(activateSelected)
-                        .onChange(of: query) { selection = 0 }
+                        .onChange(of: query) { selection = 0; items = computeItems() }
                 }
                 .padding(.horizontal, 18).padding(.vertical, 15)
 
@@ -106,7 +123,7 @@ struct CommandPalette: View {
             .shadow(color: .black.opacity(0.25), radius: 30, y: 10)
             .padding(.top, 90)
         }
-        .onAppear { focused = true }
+        .onAppear { focused = true; items = computeItems() }
         .onKeyPress(.downArrow) { move(1); return .handled }
         .onKeyPress(.upArrow) { move(-1); return .handled }
         .dismissOnEscape { close() }
@@ -119,7 +136,6 @@ struct CommandPalette: View {
     }
 
     private func activateSelected() {
-        let items = self.items
         guard items.indices.contains(selection) else { return }
         close()
         switch items[selection] {

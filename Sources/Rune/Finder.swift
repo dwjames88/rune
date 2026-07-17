@@ -140,42 +140,19 @@ final class FinderStore: ObservableObject {
         // Pages often gate assets by referer — claim the page we came from.
         if !sourceURL.isEmpty { request.setValue(sourceURL, forHTTPHeaderField: "Referer") }
         let (data, response) = try await URLSession.shared.data(for: request)
-
-        let ext = Self.fileExtension(for: assetURL, response: response)
-        let kind = Self.kind(forExtension: ext)
-        var item = FinderItem(fileName: Self.displayName(for: assetURL, title: sourceTitle),
-                              ext: ext, kind: kind,
-                              sourceURL: sourceURL, assetURL: assetURL.absoluteString)
-        item.sourceTitle = sourceTitle
-        item.tags = tags
-        item.folderIDs = folderIDs
-        item.byteSize = data.count
-
-        let folder = dir(for: item.id)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        try data.write(to: fileURL(for: item), options: .atomic)
-
-        if kind == .image, let image = NSImage(data: data) {
-            let pixels = image.representations.first.map { ($0.pixelsWide, $0.pixelsHigh) }
-            item.width = pixels?.0
-            item.height = pixels?.1
-            item.colors = Self.dominantColors(of: image)
-            if let thumb = Self.thumbnail(of: image, maxDimension: 512),
-               let png = thumb.png {
-                try? png.write(to: thumbURL(for: item), options: .atomic)
-            }
-        }
-
-        writeMetadata(item)
-        items.insert(item, at: 0)
-        return item
+        return try await save(data: data,
+                              ext: Self.fileExtension(for: assetURL, response: response),
+                              fileName: Self.displayName(for: assetURL, title: sourceTitle),
+                              sourceURL: sourceURL, sourceTitle: sourceTitle, tags: tags,
+                              assetURL: assetURL.absoluteString, folderIDs: folderIDs)
     }
 
     /// Import a local file (macOS Service, dock drop, window drop). The
     /// original is copied in; the source stays untouched.
     @discardableResult
     func importFile(_ url: URL) async throws -> FinderItem {
-        let data = try Data(contentsOf: url)
+        // Read off the main actor — this can be a movie on a slow disk.
+        let data = try await Task.detached { try Data(contentsOf: url) }.value
         let ext = url.pathExtension.isEmpty ? "bin" : url.pathExtension.lowercased()
         return try await save(data: data, ext: ext,
                               fileName: url.deletingPathExtension().lastPathComponent,
@@ -190,30 +167,43 @@ final class FinderStore: ObservableObject {
                               fileName: name, sourceURL: "", sourceTitle: "")
     }
 
-    /// Save raw data directly (page snapshots, dropped files). Same pipeline,
-    /// no download step.
+    /// The one save pipeline. Every capture path above funnels into here —
+    /// two copies of this used to drift, and the image work now happens off
+    /// the main actor where a 40-megapixel capture can't stall the UI.
     @discardableResult
     func save(data: Data, ext: String, fileName: String, sourceURL: String, sourceTitle: String,
-              tags: [String] = []) async throws -> FinderItem {
+              tags: [String] = [], assetURL: String = "", folderIDs: [UUID] = []) async throws -> FinderItem {
         var item = FinderItem(fileName: fileName, ext: ext, kind: Self.kind(forExtension: ext),
-                              sourceURL: sourceURL, assetURL: "")
+                              sourceURL: sourceURL, assetURL: assetURL)
         item.sourceTitle = sourceTitle
         item.tags = tags
+        item.folderIDs = folderIDs
         item.byteSize = data.count
         let folder = dir(for: item.id)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try data.write(to: fileURL(for: item), options: .atomic)
-        if item.kind == .image, let image = NSImage(data: data) {
-            let pixels = image.representations.first.map { ($0.pixelsWide, $0.pixelsHigh) }
-            item.width = pixels?.0; item.height = pixels?.1
-            item.colors = Self.dominantColors(of: image)
-            if let thumb = Self.thumbnail(of: image, maxDimension: 512), let png = thumb.png {
+        if item.kind == .image, let analysis = await Task.detached(operation: { Self.analyzeImage(data) }).value {
+            item.width = analysis.width
+            item.height = analysis.height
+            item.colors = analysis.colors
+            if let png = analysis.thumbPNG {
                 try? png.write(to: thumbURL(for: item), options: .atomic)
             }
         }
         writeMetadata(item)
         items.insert(item, at: 0)
         return item
+    }
+
+    /// Decode, measure, bucket colors, thumbnail — everything worth knowing
+    /// about an image, computed away from the main actor. The NSImage never
+    /// escapes; only value types come back.
+    private nonisolated static func analyzeImage(_ data: Data)
+        -> (width: Int?, height: Int?, colors: [String], thumbPNG: Data?)? {
+        guard let image = NSImage(data: data) else { return nil }
+        let pixels = image.representations.first.map { ($0.pixelsWide, $0.pixelsHigh) }
+        return (pixels?.0, pixels?.1, dominantColors(of: image),
+                thumbnail(of: image, maxDimension: 512)?.png)
     }
 
     // MARK: Thumbnails (decoded once, cached — same rationale as FaviconCache)
@@ -323,7 +313,7 @@ final class FinderStore: ObservableObject {
         return title.isEmpty ? "Untitled" : title
     }
 
-    static func thumbnail(of image: NSImage, maxDimension: CGFloat) -> NSImage? {
+    nonisolated static func thumbnail(of image: NSImage, maxDimension: CGFloat) -> NSImage? {
         let size = image.size
         guard size.width > 0, size.height > 0 else { return nil }
         let scale = min(1, maxDimension / max(size.width, size.height))
@@ -338,7 +328,7 @@ final class FinderStore: ObservableObject {
 
     /// Up to three dominant colors: downsample to a tiny bitmap, quantize,
     /// count buckets. Crude but dependency-free and plenty for filtering.
-    static func dominantColors(of image: NSImage, count: Int = 3) -> [String] {
+    nonisolated static func dominantColors(of image: NSImage, count: Int = 3) -> [String] {
         guard let small = thumbnail(of: image, maxDimension: 24),
               let tiff = small.tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff) else { return [] }

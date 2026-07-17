@@ -105,6 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         history.flush()
         appearance.flush()
         sites.flush()
+        settings.flush()
     }
 
     // MARK: Browser windows
