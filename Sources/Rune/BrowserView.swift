@@ -957,12 +957,17 @@ private struct TabContent: View {
             WebContainer(webView: tab.webView, onClick: onClick).id(tab.id)
                 // Claude, anchored to the page: hover a link for a summary,
                 // select text for actions.
-                .overlay(alignment: .topLeading) {
+                // Bottom corner, not at the cursor. A page draws its own hover
+                // popups right next to its links — Wikipedia's previews, every
+                // tooltip — so anchoring here means two boxes over each other.
+                // The corner is where a browser has always put what it wants to
+                // tell you about a link, and nothing of the page's is there.
+                .overlay(alignment: .bottomLeading) {
                     if let hover = tab.hoveredLink {
                         LinkSummaryPopover(target: hover, ai: model.ai)
-                            .offset(x: min(max(8, hover.x), 900), y: hover.y + 6)
+                            .padding(12)
                             .allowsHitTesting(false)
-                            .transition(.opacity)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
                 }
                 .overlay(alignment: .topLeading) {

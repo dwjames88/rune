@@ -26,9 +26,7 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
             case "linkHover":
                 guard let href = body["href"] as? String, let url = URL(string: href),
                       url.absoluteString != tab.urlString else { return }
-                tab.hoveredLink = HoverTarget(url: url,
-                                              x: body["x"] as? Double ?? 0,
-                                              y: body["y"] as? Double ?? 0)
+                tab.hoveredLink = HoverTarget(url: url)
             case "linkOut":
                 tab.hoveredLink = nil
             case "selection":

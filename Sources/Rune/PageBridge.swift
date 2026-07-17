@@ -1,12 +1,11 @@
 import Foundation
 import WebKit
 
-/// What the page is currently offering Claude: a link you're hovering, or text
-/// you've selected. Positions are viewport CSS pixels, so the UI can anchor to them.
+/// A link you're hovering. No position: the summary lives in the corner, out of
+/// the page's way, because a page draws its *own* popups next to its links and
+/// two popups fighting for the same spot is what you get for anchoring there.
 struct HoverTarget: Equatable {
     var url: URL
-    var x: Double
-    var y: Double
 }
 
 struct SelectionTarget: Equatable {
@@ -49,9 +48,8 @@ enum PageBridge {
         if (!href || href.startsWith('javascript:')) return;
         clearTimeout(timer);
         timer = setTimeout(() => {
-          const r = a.getBoundingClientRect();
           hoverShown = true;
-          post({ type: 'linkHover', href: href, x: r.left, y: r.bottom });
+          post({ type: 'linkHover', href: href });
         }, hoverMs());
       }, true);
 
