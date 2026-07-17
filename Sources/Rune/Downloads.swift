@@ -241,7 +241,7 @@ struct DownloadsPanel: View {
                 .frame(maxHeight: 260)
             }
         }
-        .frame(width: 320)
+        .frame(maxWidth: 320)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: appearance.cornerRadius + 2))
         .overlay(RoundedRectangle(cornerRadius: appearance.cornerRadius + 2).strokeBorder(appearance.hairline))
         .shadow(color: .black.opacity(0.18), radius: 14, y: 6)

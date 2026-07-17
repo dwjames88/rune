@@ -348,11 +348,38 @@ private struct SessionSection: View {
     @EnvironmentObject var appearance: AppearanceStore
     @State private var targeted = false
 
+    /// The tab list with a split folded into a single row. Two tabs sharing one
+    /// window are one thing you're looking at, and the sidebar should say so
+    /// once — two rows both claiming to be selected is the same fact told twice.
+    /// Only session tabs fold: a pinned tab lives on its shelf whatever else
+    /// it's doing.
+    private var rows: [TabRow] {
+        let pair: (Tab, Tab)? = {
+            guard model.isSplit,
+                  let p = model.tab(for: .primary), let s = model.tab(for: .secondary), p !== s,
+                  model.sessionTabs.contains(where: { $0 === p }),
+                  model.sessionTabs.contains(where: { $0 === s }) else { return nil }
+            return (p, s)
+        }()
+        var folded = false
+        return model.sessionTabs.enumerated().compactMap { index, tab in
+            guard let pair, tab === pair.0 || tab === pair.1 else { return .single(tab, index: index) }
+            guard !folded else { return nil }
+            folded = true
+            return .split(primary: pair.0, secondary: pair.1, index: index)
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             SectionHeader(title: "Tabs")
-            ForEach(Array(model.sessionTabs.enumerated()), id: \.element.id) { index, tab in
-                SessionRow(model: model, tab: tab, dropIndex: index)
+            ForEach(rows) { row in
+                switch row {
+                case .single(let tab, let index):
+                    SessionRow(model: model, tab: tab, dropIndex: index)
+                case .split(let primary, let secondary, _):
+                    SplitRow(model: model, primary: primary, secondary: secondary)
+                }
             }
         }
         .padding(.vertical, 2)
@@ -445,6 +472,67 @@ private struct SessionRow: View {
                 model.setName($0, for: .session(tab.id)); renaming = false
             }
         }
+    }
+}
+
+/// A row in the tab list: one tab, or the two that are sharing the window.
+private enum TabRow: Identifiable {
+    case single(Tab, index: Int)
+    case split(primary: Tab, secondary: Tab, index: Int)
+
+    var id: UUID {
+        switch self {
+        case .single(let tab, _): tab.id
+        case .split(let primary, _, _): primary.id
+        }
+    }
+}
+
+/// Two tabs in one row, sharing it the way they share the window. The half you
+/// last touched is filled — that's where the next ⌘L or ⌘W lands, and guessing
+/// is how you close the wrong page.
+private struct SplitRow: View {
+    @ObservedObject var model: BrowserModel
+    @ObservedObject var primary: Tab
+    @ObservedObject var secondary: Tab
+    @EnvironmentObject var appearance: AppearanceStore
+    @State private var hovering: BrowserModel.Pane?
+
+    var body: some View {
+        HStack(spacing: 1) {
+            half(primary, pane: .primary)
+            Rectangle().fill(appearance.hairline).frame(width: 1, height: 16)
+            half(secondary, pane: .secondary)
+        }
+        .padding(.horizontal, 2)
+        .frame(height: 30)
+        .background(RoundedRectangle(cornerRadius: appearance.cornerRadius).fill(appearance.selection))
+    }
+
+    @ViewBuilder
+    private func half(_ tab: Tab, pane: BrowserModel.Pane) -> some View {
+        HStack(spacing: 5) {
+            Favicon(image: tab.favicon, name: tab.displayName, size: 13, loading: tab.isLoading)
+            Text(tab.displayName).lineLimit(1).font(appearance.font(11))
+            Spacer(minLength: 0)
+            AudioBadge(tab: tab)
+            if hovering == pane {
+                Button { model.close(session: tab) } label: {
+                    Image(systemName: "xmark").font(.system(size: 7, weight: .bold))
+                        .foregroundStyle(appearance.sidebarSecondary)
+                        .padding(2).background(appearance.hover, in: Circle())
+                }.buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 5)
+        .frame(maxWidth: .infinity)
+        .frame(height: 26)
+        .background(RoundedRectangle(cornerRadius: appearance.cornerRadius - 1)
+            .fill(model.focusedPane == pane ? appearance.hover : .clear))
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 ? pane : nil }
+        .onTapGesture { model.focusedPane = pane }
+        .help(tab.displayName)
     }
 }
 
@@ -1024,11 +1112,17 @@ private struct TabContent: View {
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
                 }
+                // Clamped to the pane it's actually in. This used to stop at a
+                // hardcoded 860, which is a bet that the view is a whole window
+                // — in half of one it walked straight off the edge.
                 .overlay(alignment: .topLeading) {
                     if let selection = tab.selection {
-                        SelectionActions(target: selection, ai: model.ai)
-                            .offset(x: min(max(8, selection.x), 860), y: selection.y + 8)
-                            .transition(.opacity)
+                        GeometryReader { geo in
+                            SelectionActions(target: selection, ai: model.ai)
+                                .offset(x: min(max(8, selection.x), max(8, geo.size.width - 368)),
+                                        y: selection.y + 8)
+                        }
+                        .transition(.opacity)
                     }
                 }
                 .animation(.easeOut(duration: 0.12), value: tab.hoveredLink)
@@ -1053,6 +1147,7 @@ private struct StartPage: View {
         VStack(spacing: 22) {
             Spacer()
             Text(greeting).font(appearance.font(40, weight: .semibold))
+                .lineLimit(1).minimumScaleFactor(0.4)
                 .foregroundStyle(appearance.text(on: appearance.startPageBG).opacity(0.85))
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
@@ -1067,11 +1162,24 @@ private struct StartPage: View {
             .overlay(Capsule().strokeBorder(focused ? appearance.accent : appearance.hairline, lineWidth: 1))
 
             if a.startPageShowFavorites && !model.favorites.isEmpty {
-                HStack(spacing: 14) {
-                    ForEach(model.favorites) { fav in
-                        StartPageTile(saved: fav) { model.select(.saved(fav.id)) }
+                // One centred row for as long as one fits, and a wrapping grid
+                // when it doesn't. Neither works alone: an HStack can't wrap, it
+                // just runs off the side; a grid fills its frame, so a row of
+                // six in seven columns' worth of space sits visibly off-centre.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 14) {
+                        ForEach(model.favorites) { fav in
+                            StartPageTile(saved: fav) { model.select(.saved(fav.id)) }
+                        }
+                    }
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 64, maximum: 84), spacing: 14)],
+                              spacing: 12) {
+                        ForEach(model.favorites) { fav in
+                            StartPageTile(saved: fav) { model.select(.saved(fav.id)) }
+                        }
                     }
                 }
+                .frame(maxWidth: 560)
                 .padding(.top, 8)
             }
             if a.startPageShowRecents && !recents.isEmpty {
@@ -1096,6 +1204,7 @@ private struct StartPage: View {
             }
             Spacer(); Spacer()
         }
+        .padding(.horizontal, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity).background(appearance.startPageBG)
         .onAppear { focused = true }
         .onReceive(NotificationCenter.default.publisher(for: .focusStartPage)) {

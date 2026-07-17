@@ -55,7 +55,7 @@ struct LinkSummaryPopover: View {
             .fixedSize(horizontal: false, vertical: true)
         }
         .padding(10)
-        .frame(width: 300, alignment: .leading)
+        .frame(maxWidth: 300, alignment: .leading)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(appearance.hairline))
         .shadow(color: .black.opacity(0.18), radius: 12, y: 4)
@@ -121,7 +121,7 @@ struct SelectionActions: View {
             }
         }
         .padding(10)
-        .frame(width: result == nil ? 300 : 360, alignment: .leading)
+        .frame(maxWidth: result == nil ? 300 : 360, alignment: .leading)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(appearance.hairline))
         .shadow(color: .black.opacity(0.18), radius: 12, y: 4)
@@ -194,7 +194,7 @@ struct AskBar: View {
                 .frame(maxHeight: 260)
             }
         }
-        .frame(width: 620)
+        .frame(maxWidth: 620)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(appearance.hairline))
         .shadow(color: .black.opacity(0.22), radius: 24, y: 8)
