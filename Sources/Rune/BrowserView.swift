@@ -659,6 +659,9 @@ private struct TabMenu: View {
         if let rename { Button("Rename…", action: rename) }
         if let url = model.url(for: selection) {
             Button("Copy Link") { model.copy(url) }
+            Button("Open as Panel") {
+                if let real = URL(string: url) { model.openPanel(url: real) }
+            }
         }
         if let live = model.tab(for: selection), live.isPlayingAudio || live.muted {
             Button(live.muted ? "Unmute Tab" : "Mute Tab") { live.toggleMute() }
@@ -727,6 +730,7 @@ private struct ContentArea: View {
                     highlighted: $highlighted, suggestionCount: suggestions.count,
                     showDownloads: $showDownloads, activate: activate)
             Divider()
+            HStack(spacing: 0) {
             ZStack(alignment: .top) {
                 appearance.windowBG
                 if model.isSplit {
@@ -774,6 +778,14 @@ private struct ContentArea: View {
                         .padding(.top, 10)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
+            }
+            // Beside the content, never over it: a panel is a column, and the
+            // page keeps whatever room is left.
+            if let panel = model.panel {
+                Divider()
+                WebContainer(webView: panel.webView).id(panel.id)
+                    .frame(width: 340)
+            }
             }
         }
         .animation(.easeOut(duration: 0.18), value: toast)

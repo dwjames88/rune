@@ -28,6 +28,8 @@ enum Command: String, CaseIterable, Identifiable {
     case showDownloads
     case toggleBlocking
     case toggleSplit
+    case togglePanel
+    case saveSession
     case newSpace
     case nextSpace
     case previousSpace
@@ -66,6 +68,8 @@ enum Command: String, CaseIterable, Identifiable {
         case .showDownloads: "Downloads"
         case .toggleBlocking: "Block Content on This Site"
         case .toggleSplit: "Split View"
+        case .togglePanel: "Show / Hide Panel"
+        case .saveSession: "Save Tabs as Session"
         case .newSpace: "New Space"
         case .nextSpace: "Next Space"
         case .previousSpace: "Previous Space"
@@ -105,6 +109,8 @@ enum Command: String, CaseIterable, Identifiable {
         case .showDownloads: "arrow.down.circle"
         case .toggleBlocking: "shield"
         case .toggleSplit: "rectangle.split.2x1"
+        case .togglePanel: "sidebar.squares.right"
+        case .saveSession: "tray.and.arrow.down"
         case .newSpace: "square.stack.badge.plus"
         case .nextSpace: "square.stack"
         case .previousSpace: "square.stack"
@@ -122,10 +128,10 @@ enum Command: String, CaseIterable, Identifiable {
     var menu: MenuSection {
         switch self {
         case .newTab, .closeTab, .undoCloseTab, .newPrivateWindow, .copyURL, .printPage, .pinTab: .file
-        case .reload, .findInPage, .zoomIn, .zoomOut, .zoomReset, .muteTab, .showDownloads, .toggleBlocking, .toggleSplit,
+        case .reload, .findInPage, .zoomIn, .zoomOut, .zoomReset, .muteTab, .showDownloads, .toggleBlocking, .toggleSplit, .togglePanel,
              .toggleSidebar, .togglePiP, .commandPalette, .askPage: .view
         case .goBack, .goForward: .history
-        case .focusAddress, .nextTab, .previousTab, .newSpace, .nextSpace, .previousSpace: .navigate
+        case .focusAddress, .nextTab, .previousTab, .newSpace, .nextSpace, .previousSpace, .saveSession: .navigate
         case .openFinder, .saveMediaUnderCursor, .collectFromPage, .capturePage: .finder
         case .openSettings: .app
         }
@@ -157,6 +163,8 @@ enum Command: String, CaseIterable, Identifiable {
         case .showDownloads: ("l", [.command, .option])
         case .toggleBlocking: ("", [])
         case .toggleSplit: ("\\", [.command, .option])
+        case .togglePanel: ("e", [.command, .option])
+        case .saveSession: ("", [])
         case .newSpace: ("", [])
         case .nextSpace: ("]", [.command, .control])
         case .previousSpace: ("[", [.command, .control])

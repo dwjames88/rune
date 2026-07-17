@@ -389,6 +389,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .showDownloads: show(.showDownloads)
         case .toggleBlocking: model.toggleBlockingForActiveSite()
         case .toggleSplit: model.toggleSplit()
+        case .togglePanel: model.togglePanel()
+        case .saveSession: model.saveSession()
         case .newSpace: model.switchTo(space: model.addSpace().id)
         case .nextSpace: model.selectAdjacentSpace(1)
         case .previousSpace: model.selectAdjacentSpace(-1)

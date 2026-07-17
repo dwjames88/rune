@@ -51,6 +51,21 @@ struct Space: Codable, Identifiable, Equatable {
     var favorites: [SavedTab] = []
     var pinned: [SavedTab] = []
     var folders: [Folder] = []
+    /// A site pinned beside your tabs — a chat, music, notes. Optional for the
+    /// same reason profileID is: spaces written before panels existed say
+    /// nothing about them, and a required key would fail the whole decode.
+    var panelURL: String?
+    /// Tab sets you named and put away.
+    var sessions: [NamedSession]?
+}
+
+/// A set of tabs you saved to come back to. Just addresses — reopening loads
+/// them fresh, the same bargain session restore makes.
+struct NamedSession: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var name: String
+    var urls: [String]
+    var savedAt = Date()
 }
 
 /// The only coloured thing in the sidebar.
@@ -91,6 +106,10 @@ final class Tab: ObservableObject, Identifiable {
     @Published var canGoBack = false
     @Published var canGoForward = false
     @Published var favicon: NSImage?
+
+    /// When you last had this tab in front of you. Hibernation and
+    /// auto-archive both ask the same question, so they read the same clock.
+    var lastActive = Date()
 
     /// Reported by the page bridge — the tab is making noise right now.
     @Published var isPlayingAudio = false
@@ -250,6 +269,9 @@ final class BrowserModel: ObservableObject {
     /// Which pane commands act on. Meaningless without a split, and reset
     /// whenever one closes.
     @Published var focusedPane: Pane = .primary
+    /// The space's pinned site, beside the tabs. Not a tab: it has no row, it
+    /// isn't in the undo stack, and switching spaces swaps it like the shelf.
+    @Published var panel: Tab?
     @Published var sidebarVisible = true
     /// Batch-collect candidates; non-nil presents the collect sheet.
     @Published var collectCandidates: [CollectCandidate]?
@@ -311,7 +333,21 @@ final class BrowserModel: ObservableObject {
         // this covers tabs that don't exist yet — including a private window's,
         // which gets blocking for free.
         reloadBlocking()
+
+        // Hibernation and auto-archive are measured in minutes and hours, so a
+        // minute's granularity is plenty and costs nothing. Holding the model
+        // weakly is what stops it: the loop ends when the window does, with no
+        // deinit to remember and no timer left running for a closed window.
+        tidySweep = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                guard let self else { return }
+                tidyUp()
+            }
+        }
     }
+
+    private var tidySweep: Task<Void, Never>?
 
     private var hoverObserver: (any NSObjectProtocol)?
     private var blockingObserver: (any NSObjectProtocol)?
@@ -512,6 +548,15 @@ final class BrowserModel: ObservableObject {
         favorites = space.favorites
         pinned = space.pinned
         folders = space.folders
+        // The panel belongs to the space too — a work chat shouldn't follow you
+        // home. Rebuilt rather than parked: one page is cheap to reload, and a
+        // panel per space held open forever is not.
+        panel?.retire()
+        panel = space.panelURL.flatMap(URL.init(string:)).map { url in
+            let tab = Tab(webView: makeWebView())
+            tab.load(url)
+            return tab
+        }
     }
 
     /// And back the other way, before anything is written.
@@ -903,6 +948,7 @@ final class BrowserModel: ObservableObject {
         }
         // A sidebar click lands in the pane you last touched.
         if focusedPane == .secondary, isSplit { splitSelection = new } else { selection = new }
+        activeTab?.lastActive = Date()
         if settings.autoPiPReturnInline { activeTab?.exitPiPIfActive() }
     }
 
@@ -1135,6 +1181,100 @@ final class BrowserModel: ObservableObject {
     func applyZoom(to tab: Tab) {
         let level = tab.webView.url?.host.map { sites.zoom(for: $0) } ?? 1
         if abs(tab.webView.pageZoom - level) > 0.001 { tab.webView.pageZoom = level }
+    }
+
+    // MARK: Web panel
+
+    /// A site pinned beside your tabs. It's a live Tab rendered in a column
+    /// instead of the main pane — the same re-parenting trick as Split View,
+    /// narrower — so the music keeps playing while you browse.
+    func openPanel(url: URL) {
+        panel?.retire()
+        let tab = Tab(webView: makeWebView())
+        tab.load(url)
+        panel = tab
+        updateSpace(currentSpaceID) { $0.panelURL = url.absoluteString }
+    }
+
+    func closePanel() {
+        panel?.retire()
+        panel = nil
+        updateSpace(currentSpaceID) { $0.panelURL = nil }
+    }
+
+    /// ⌥⌘E: bring the space's panel back, or put it away.
+    func togglePanel() {
+        if panel != nil { closePanel(); return }
+        guard let url = currentSpace?.panelURL.flatMap(URL.init(string:)) else { return }
+        openPanel(url: url)
+    }
+
+    // MARK: Named sessions
+
+    var sessions: [NamedSession] { currentSpace?.sessions ?? [] }
+
+    /// Put the current tabs away under a name. Addresses only — reopening loads
+    /// them fresh, the same bargain session restore makes.
+    @discardableResult
+    func saveSession() -> Bool {
+        let urls = sessionTabs.compactMap { $0.webView.url?.absoluteString }
+        guard !urls.isEmpty else {
+            NotificationCenter.default.post(name: .finderToast, object: "No tabs to save")
+            return false
+        }
+        let name = Date().formatted(date: .abbreviated, time: .shortened)
+        updateSpace(currentSpaceID) { $0.sessions = ($0.sessions ?? []) + [NamedSession(name: name, urls: urls)] }
+        NotificationCenter.default.post(name: .finderToast,
+                                        object: "Saved \(urls.count) tab\(urls.count == 1 ? "" : "s") as “\(name)”")
+        return true
+    }
+
+    /// Open a saved set beside what's already there — restoring a session
+    /// shouldn't throw away the one you're in.
+    func openSession(_ id: UUID) {
+        guard let session = sessions.first(where: { $0.id == id }) else { return }
+        for url in session.urls.compactMap(URL.init(string:)) { newTab(url: url, select: false) }
+        if let first = sessionTabs.last { select(.session(first.id)) }
+    }
+
+    func deleteSession(_ id: UUID) {
+        updateSpace(currentSpaceID) { $0.sessions?.removeAll { $0.id == id } }
+    }
+
+    func renameSession(_ id: UUID, to name: String) {
+        updateSpace(currentSpaceID) {
+            guard let i = $0.sessions?.firstIndex(where: { $0.id == id }) else { return }
+            $0.sessions?[i].name = name
+        }
+    }
+
+    // MARK: Tidying up
+
+    /// Hibernation and auto-archive are the same idea at two scales: a tab you
+    /// stopped using shouldn't keep costing you. A saved tab loses its page and
+    /// keeps its row; a session tab you never came back to is already in
+    /// history, so it just goes. Both off by default — this is Rune deciding to
+    /// close something you opened, which should always be your call.
+    private func tidyUp() {
+        let now = Date()
+        if settings.hibernateAfter > 0 {
+            let idle = settings.hibernateAfter * 60
+            for (savedID, tab) in openTabs
+            where selection != .saved(savedID) && splitSelection != .saved(savedID)
+                && !tab.isPlayingAudio
+                && now.timeIntervalSince(tab.lastActive) > idle {
+                unload(savedID: savedID)
+            }
+        }
+        if settings.archiveAfter > 0 {
+            let idle = settings.archiveAfter * 3600
+            for tab in sessionTabs
+            where currentSelection != .session(tab.id) && splitSelection != .session(tab.id)
+                && !tab.isPlayingAudio
+                && now.timeIntervalSince(tab.lastActive) > idle {
+                close(session: tab)
+            }
+        }
     }
 
     // MARK: Content blocking

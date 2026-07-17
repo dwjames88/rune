@@ -267,6 +267,12 @@ final class SettingsStore: ObservableObject {
     /// Which model runs Rune's AI. On-device by default — free, private and
     /// offline; Claude is the upgrade you opt into.
     @Published var aiModel: AIModel { didSet { save() } }
+    /// Unload a saved tab left alone this long, in minutes. 0 = never. The row
+    /// stays; only the page behind it goes, and clicking brings it back.
+    @Published var hibernateAfter: Double { didSet { save() } }
+    /// Close a session tab left alone this long, in hours. 0 = never. It's in
+    /// history either way — this is for the tabs you meant to close.
+    @Published var archiveAfter: Double { didSet { save() } }
     /// A link handed to Rune by another app: a tab, or a window of its own.
     @Published var externalLinks: ExternalLinkBehavior { didSet { save() } }
     /// Block ads and trackers. On by default: it's the single biggest thing
@@ -301,6 +307,8 @@ final class SettingsStore: ObservableObject {
         var blockContent: Bool?
         var hideCookieBanners: Bool?
         var externalLinks: ExternalLinkBehavior?
+        var hibernateAfter: Double?
+        var archiveAfter: Double?
     }
 
     init() {
@@ -320,6 +328,8 @@ final class SettingsStore: ObservableObject {
         restoreSession = saved?.restoreSession ?? false
         aiModel = saved?.aiModel ?? .onDevice
         externalLinks = saved?.externalLinks ?? .segment
+        hibernateAfter = saved?.hibernateAfter ?? 0
+        archiveAfter = saved?.archiveAfter ?? 0
         blockContent = saved?.blockContent ?? true
         hideCookieBanners = saved?.hideCookieBanners ?? true
     }
@@ -333,7 +343,8 @@ final class SettingsStore: ObservableObject {
                                  downloadLocation: downloadLocation, restoreSession: restoreSession,
                                  aiModel: aiModel, blockContent: blockContent,
                                  hideCookieBanners: hideCookieBanners,
-                                 externalLinks: externalLinks),
+                                 externalLinks: externalLinks,
+                                 hibernateAfter: hibernateAfter, archiveAfter: archiveAfter),
                          to: "settings.json")
     }
     private func hoverChanged() {

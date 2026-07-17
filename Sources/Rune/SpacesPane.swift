@@ -12,6 +12,7 @@ struct SpacesPane: View {
 
     @State private var renamingSpace: UUID?
     @State private var renamingProfile: UUID?
+    @State private var renamingSession: UUID?
     @State private var pickingIcon: UUID?
     @State private var pickingProfileIcon: UUID?
     @State private var confirmingProfileDelete: Profile?
@@ -34,6 +35,19 @@ struct SpacesPane: View {
                 Text("Spaces")
             } footer: {
                 Text("A space keeps its own favorites, pinned tabs and theme. Drag to reorder — that's the order ⌃⌘[ and ⌃⌘] walk. Switching to a space never reloads what was open in it.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section {
+                if model.sessions.isEmpty {
+                    Text("No saved sessions. “\(Command.saveSession.title)” puts the current tabs away under today's date.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                ForEach(model.sessions) { session in SessionRow(session: session) }
+            } header: {
+                Text("Saved Sessions")
+            } footer: {
+                Text("Addresses only — opening one loads the pages fresh, beside whatever you already have rather than instead of it. Sessions belong to the space they were saved in.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -120,6 +134,31 @@ struct SpacesPane: View {
                 RenamePopover(title: "Rename Space", name: space.name) { name in
                     model.updateSpace(space.id) { $0.name = name }
                     renamingSpace = nil
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func SessionRow(session: NamedSession) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "tray.full").foregroundStyle(.secondary).frame(width: 20)
+            Text(session.name)
+            Spacer()
+            Text("\(session.urls.count) tab\(session.urls.count == 1 ? "" : "s")")
+                .font(.caption).foregroundStyle(.secondary)
+            Button("Open") { model.openSession(session.id) }
+            Menu {
+                Button("Rename…") { renamingSession = session.id }
+                Button("Delete", role: .destructive) { model.deleteSession(session.id) }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .menuStyle(.borderlessButton).frame(width: 24)
+            .popover(isPresented: bind($renamingSession, session.id)) {
+                RenamePopover(title: "Rename Session", name: session.name) { name in
+                    model.renameSession(session.id, to: name)
+                    renamingSession = nil
                 }
             }
         }

@@ -109,12 +109,20 @@ All shipped. Kept here as the map of what landed where.
      live Tab. They differ by whether it floats and what opens it — nothing
      else, which is why there's one of them.
 
-7. **The rest, by appetite** — web panels (pin a chat/music site in the
-   sidebar; the same "a Tab rendered somewhere else" primitive again) · tab
-   hibernation (`unload(savedID:)` already exists) · reader mode (PageBridge
-   extracts the text — but good extraction without a dependency is the one
-   place the zero-deps rule actively costs us) · auto-archive stale tabs ·
-   named sessions.
+7. **The rest** — ✅ **DONE (v1.08)**, except reader mode.
+   - **Web panels** — "Open as Panel" on any tab: a live web view in a column
+     beside the page, pinned to the space, so the music keeps playing. ⌥⌘E.
+   - **Tab hibernation** · **auto-archive** — the same idea at two scales, so
+     one sweep and one clock (`Tab.lastActive`). Both off by default: this is
+     Rune closing something you opened. Neither touches what's on screen, what's
+     in a split, or what's making noise.
+   - **Named sessions** — put the current tabs away under a name; reopening
+     loads them beside what you have, not instead of it. Managed in
+     Settings ▸ Spaces, and they belong to the space they were saved in.
+   - **Reader mode** — ⏳ **still open**, and the one place the zero-deps rule
+     actively costs us: `article || main || body` is too crude for a real
+     reader, and doing it properly means hand-writing a Readability heuristic.
+     Deliberately not rushed into v1.1.
    - **Per-site settings** — ✅ **mostly DONE (v1.02)**. `SiteSettings` is one
      host-keyed store for zoom and blocking exceptions; the next per-site thing
      costs a field, not a file. Auto-PiP allowlist and per-site theme are the

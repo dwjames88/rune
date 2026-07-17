@@ -352,6 +352,25 @@ private struct BrowsingPane: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
+                Picker("Unload a saved tab after", selection: $settings.hibernateAfter) {
+                    Text("Never").tag(0.0)
+                    Text("15 minutes").tag(15.0)
+                    Text("1 hour").tag(60.0)
+                    Text("4 hours").tag(240.0)
+                }
+                Picker("Close an untouched tab after", selection: $settings.archiveAfter) {
+                    Text("Never").tag(0.0)
+                    Text("12 hours").tag(12.0)
+                    Text("24 hours").tag(24.0)
+                    Text("3 days").tag(72.0)
+                }
+            } header: {
+                Text("Tidying Up")
+            } footer: {
+                Text("Both off by default — this is Rune deciding to put something away that you opened, which should be your call. An unloaded saved tab keeps its row and comes back when you click it; a closed tab is still in history. Neither ever touches what's on screen or what's making noise.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
                 Toggle("Reopen last session's tabs on launch", isOn: $settings.restoreSession)
             } header: {
                 Text("Session")
