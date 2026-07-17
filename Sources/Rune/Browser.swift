@@ -756,6 +756,10 @@ final class BrowserModel: ObservableObject {
         webView.onSaveToFinder = { [weak self, weak webView] url, _ in
             self?.saveToFinder(assetURL: url, from: webView)
         }
+        webView.onDownload = { [weak self, weak webView] url in
+            guard let webView else { return }
+            self?.coordinator.startDownload(url, from: webView)
+        }
         return webView
     }
 

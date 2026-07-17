@@ -40,12 +40,11 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
                 tab.isPlayingAudio = body["playing"] as? Bool ?? false
             case "contextTarget":
                 guard let runeView = webView as? RuneWebView else { return }
-                if let src = body["src"] as? String, let url = URL(string: src) {
-                    let kind: FinderItem.Kind = (body["kind"] as? String) == "video" ? .video : .image
-                    runeView.contextTarget = .init(url: url, kind: kind, at: Date())
-                } else {
-                    runeView.contextTarget = nil
-                }
+                let media = (body["src"] as? String).flatMap { URL(string: $0) }
+                let link = (body["href"] as? String).flatMap { URL(string: $0) }
+                let kind: FinderItem.Kind = (body["kind"] as? String) == "video" ? .video : .image
+                runeView.contextTarget = media == nil && link == nil
+                    ? nil : .init(media: media, kind: kind, link: link, at: Date())
             default: break
             }
         }
@@ -69,6 +68,9 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
     /// link, and Rune has downloads now.
     func webView(_ webView: WKWebView,
                  decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
+        // <a download>: the page is telling us this link is a file to keep, not
+        // a place to go. Believe it before doing anything else with the click.
+        if navigationAction.shouldPerformDownload { return .download }
         guard navigationAction.navigationType == .linkActivated,
               let url = navigationAction.request.url else { return .allow }
         let flags = navigationAction.modifierFlags
@@ -83,10 +85,26 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
         return .allow
     }
 
-    /// Anything WebKit can't render is a file you meant to keep.
+    /// Anything WebKit can't render is a file you meant to keep — and so is
+    /// anything the server marked as an attachment.
+    ///
+    /// `canShowMIMEType` only answers "could WebKit paint these bytes", and it
+    /// can happily paint the JPEG a Download button just handed us. The server
+    /// already said which one it is; nobody was reading it.
     func webView(_ webView: WKWebView,
                  decidePolicyFor navigationResponse: WKNavigationResponse) async -> WKNavigationResponsePolicy {
-        navigationResponse.canShowMIMEType ? .allow : .download
+        if navigationResponse.response.isAttachment { return .download }
+        return navigationResponse.canShowMIMEType ? .allow : .download
+    }
+
+    /// Start a download Rune asked for itself, rather than one WebKit handed us.
+    /// The context menu needs this: WebKit's own download items make a
+    /// `WKDownload` it only offers back through private API, so they arrive
+    /// nowhere. Starting our own puts it back on the one delegate below.
+    func startDownload(_ url: URL, from webView: WKWebView) {
+        webView.startDownload(using: URLRequest(url: url)) { download in
+            download.delegate = self
+        }
     }
 
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction,
@@ -216,6 +234,16 @@ extension WebCoordinator: WKDownloadDelegate {
 }
 
 // MARK: - Modifier conventions
+
+private extension URLResponse {
+    /// `Content-Disposition: attachment` — the server asking to be saved rather
+    /// than shown. `suggestedFilename` already parses the name out of it.
+    var isAttachment: Bool {
+        guard let http = self as? HTTPURLResponse,
+              let value = http.value(forHTTPHeaderField: "Content-Disposition") else { return false }
+        return value.trimmingCharacters(in: .whitespaces).lowercased().hasPrefix("attachment")
+    }
+}
 
 private extension WKNavigationAction {
     /// ⌘-click means "put it over there, I'm still reading this"; adding shift

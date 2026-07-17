@@ -92,11 +92,14 @@ enum PageBridge {
       document.addEventListener('mouseover', (e) => { lastMedia = mediaInfo(e.target); }, true);
       window.__runeMedia = () => lastMedia;
 
-      // Right-click → tell native what's under the cursor so the context menu
-      // can offer "Save to Rune Finder". Fires once per right-click.
+      // Right-click → tell native what's under the cursor, so the context menu
+      // can offer "Save to Rune Finder" and can repair WebKit's dead download
+      // items. Fires once per right-click.
       document.addEventListener('contextmenu', (e) => {
         const m = mediaInfo(e.target);
-        post({ type: 'contextTarget', src: m ? m.src : null, kind: m ? m.kind : null });
+        const a = e.target.closest && e.target.closest('a[href]');
+        post({ type: 'contextTarget', src: m ? m.src : null, kind: m ? m.kind : null,
+               href: a && a.href && !a.href.startsWith('javascript:') ? a.href : null });
       }, true);
 
       // Audio state + mute. WKWebView has no public per-tab mute, so the media

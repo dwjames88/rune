@@ -373,31 +373,65 @@ struct CollectCandidate: Codable, Identifiable, Equatable {
 /// menu. The PageBridge posts the media element under the cursor on
 /// `contextmenu`; the coordinator stashes it here just before the menu opens.
 final class RuneWebView: WKWebView {
+    /// What the last right-click landed on. Either half can be missing — a bare
+    /// image has no link, a text link has no media, a linked image has both.
     struct ContextTarget {
-        var url: URL
+        var media: URL?
         var kind: FinderItem.Kind
+        var link: URL?
         var at: Date
     }
 
     var contextTarget: ContextTarget?
     var onSaveToFinder: ((URL, FinderItem.Kind) -> Void)?
+    var onDownload: ((URL) -> Void)?
 
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
-        // Only offer the item when the bridge reported fresh media — a stale
-        // target means this right-click landed somewhere else.
+        // A stale target means this right-click landed somewhere else.
         guard let target = contextTarget, Date().timeIntervalSince(target.at) < 2 else { return }
+
+        // WebKit's own download items build a WKDownload it only hands back
+        // through private API, so out of the box they do nothing at all: you
+        // click Download Image and the click goes in the bin. We already know
+        // what's under the cursor, so point them at Rune's download path.
+        for item in menu.items {
+            switch item.identifier?.rawValue {
+            case "WKMenuItemIdentifierDownloadImage", "WKMenuItemIdentifierDownloadMedia":
+                redirect(item, to: target.media)
+            case "WKMenuItemIdentifierDownloadLinkedFile":
+                redirect(item, to: target.link)
+            default: break
+            }
+        }
+
+        guard let media = target.media else { return }
         let title = target.kind == .video ? "Save Video to Rune" : "Save Image to Rune"
-        let item = NSMenuItem(title: title, action: #selector(saveContextTarget), keyEquivalent: "")
+        let item = NSMenuItem(title: title, action: #selector(saveContextTarget(_:)), keyEquivalent: "")
         item.target = self
+        item.representedObject = media
         item.image = NSImage(systemSymbolName: "sparkles.rectangle.stack", accessibilityDescription: nil)
         menu.insertItem(item, at: 0)
         menu.insertItem(.separator(), at: 1)
     }
 
-    @objc private func saveContextTarget() {
-        guard let target = contextTarget else { return }
-        onSaveToFinder?(target.url, target.kind)
+    /// Leave the item alone if we don't know its URL: an item that does nothing
+    /// is bad, but one that downloads the wrong thing is worse.
+    private func redirect(_ item: NSMenuItem, to url: URL?) {
+        guard let url else { return }
+        item.target = self
+        item.action = #selector(downloadRepresented(_:))
+        item.representedObject = url
+    }
+
+    @objc private func downloadRepresented(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        onDownload?(url)
+    }
+
+    @objc private func saveContextTarget(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL, let target = contextTarget else { return }
+        onSaveToFinder?(url, target.kind)
     }
 }
 
