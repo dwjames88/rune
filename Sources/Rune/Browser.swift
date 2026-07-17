@@ -697,6 +697,20 @@ final class BrowserModel: ObservableObject {
 
     var isSplit: Bool { splitSelection != nil }
 
+    /// How the window divides between the two panes. Half and half is a guess,
+    /// and a wrong one often enough: plenty of pages want more than half a
+    /// window, and the one you're reading is rarely the one you're glancing at.
+    @Published var splitRatio: Double = 0.5
+
+    /// Which pane a selection is showing in, or nil if it isn't on screen.
+    /// A split has two tabs open at once, so "is this row selected" stopped
+    /// being the same question as "is this the selection".
+    func pane(showing selection: Selection) -> Pane? {
+        if self.selection == selection { return .primary }
+        if splitSelection == selection { return .secondary }
+        return nil
+    }
+
     func selection(for pane: Pane) -> Selection? {
         pane == .secondary ? splitSelection : selection
     }

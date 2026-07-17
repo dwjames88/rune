@@ -201,7 +201,7 @@ private struct FavoritesSection: View {
             SectionHeader(title: "Favorites", trailing: "\(model.favorites.count)/6")
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 6), spacing: 6) {
                 ForEach(Array(model.favorites.enumerated()), id: \.element.id) { index, fav in
-                    FaviconTile(saved: fav, selected: model.selection == .saved(fav.id))
+                    FaviconTile(saved: fav, selected: model.pane(showing: .saved(fav.id)) != nil)
                         .onTapGesture { model.select(.saved(fav.id)) }
                         .draggable(TabDrag(id: fav.id, origin: .favorite))
                         .dropDestination(for: TabDrag.self) { items, _ in
@@ -376,10 +376,13 @@ private struct SavedRow: View {
     @State private var hovering = false
     @State private var renaming = false
 
+    private var pane: BrowserModel.Pane? { model.pane(showing: .saved(saved.id)) }
+
     var body: some View {
         RowBody(icon: { Favicon(png: saved.faviconPNG, name: saved.name, size: 15) },
                 name: saved.name,
-                selected: model.selection == .saved(saved.id), hovering: hovering) {
+                selected: pane != nil, hovering: hovering,
+                paneMark: model.isSplit ? pane : nil) {
             if let live = model.openTabs[saved.id] { AudioBadge(tab: live) }
         }
             .onTapGesture { model.select(.saved(saved.id)) }
@@ -409,11 +412,14 @@ private struct SessionRow: View {
     @State private var hovering = false
     @State private var renaming = false
 
+    private var pane: BrowserModel.Pane? { model.pane(showing: .session(tab.id)) }
+
     var body: some View {
         RowBody(icon: { Favicon(image: tab.favicon, name: tab.displayName,
                                 size: 15, loading: tab.isLoading) },
                 name: tab.displayName,
-                selected: model.selection == .session(tab.id), hovering: hovering) {
+                selected: pane != nil, hovering: hovering,
+                paneMark: model.isSplit ? pane : nil) {
             AudioBadge(tab: tab)
             if hovering {
                 Button { model.close(session: tab) } label: {
@@ -449,6 +455,9 @@ private struct RowBody<Icon: View, Trailing: View>: View {
     let name: String
     let selected: Bool
     let hovering: Bool
+    /// Which half of a split this row is showing in, if any. Without it a split
+    /// reads as one tab open and one tab mysteriously gone.
+    var paneMark: BrowserModel.Pane? = nil
     @ViewBuilder var trailing: () -> Trailing
     @EnvironmentObject var appearance: AppearanceStore
 
@@ -457,6 +466,13 @@ private struct RowBody<Icon: View, Trailing: View>: View {
             icon()
             Text(name).lineLimit(1).font(appearance.font(13))
             Spacer(minLength: 4)
+            if let paneMark {
+                Image(systemName: paneMark == .primary ? "rectangle.lefthalf.filled"
+                                                       : "rectangle.righthalf.filled")
+                    .font(.system(size: 10))
+                    .foregroundStyle(appearance.sidebarSecondary)
+                    .help(paneMark == .primary ? "Showing in the left pane" : "Showing in the right pane")
+            }
             trailing()
         }
         .padding(.horizontal, 8).frame(height: 30)
@@ -734,10 +750,15 @@ private struct ContentArea: View {
             ZStack(alignment: .top) {
                 appearance.windowBG
                 if model.isSplit {
-                    HStack(spacing: 0) {
-                        Pane(model: model, pane: .primary)
-                        Divider()
-                        Pane(model: model, pane: .secondary)
+                    GeometryReader { geo in
+                        HStack(spacing: 0) {
+                            Pane(model: model, pane: .primary)
+                                .frame(width: max(0, (geo.size.width - SplitHandle.width) * model.splitRatio))
+                            SplitHandle(model: model, total: geo.size.width)
+                            Pane(model: model, pane: .secondary)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .frame(width: geo.size.width, height: geo.size.height)
                     }
                 } else if let tab = model.activeTab {
                     TabContent(tab: tab, model: model)
@@ -913,6 +934,39 @@ private struct SuggestionList: View {
         case .history(let e): return e.title.isEmpty ? e.url : e.title
         case .askAI: return "Find this in your history"
         }
+    }
+}
+
+/// The grab strip between two panes. A split fixed at half and half is a
+/// guess about what you're doing; this is how you tell it otherwise. The
+/// hairline still reads as a 1pt divider — the rest is invisible room to grab,
+/// because a 1pt drag target is a dare, not a control.
+private struct SplitHandle: View {
+    @ObservedObject var model: BrowserModel
+    let total: Double
+    @State private var startRatio: Double?
+
+    static let width: Double = 10
+
+    var body: some View {
+        Divider()
+            .frame(width: Self.width)
+            .contentShape(Rectangle())
+            .onHover { $0 ? NSCursor.resizeLeftRight.push() : NSCursor.pop() }
+            .gesture(
+                // Global, not local: the handle moves as you drag it, so in its
+                // own coordinate space the origin runs away underneath the
+                // gesture and the drag measures itself short.
+                DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                    .onChanged { value in
+                        guard total > 0 else { return }
+                        let base = startRatio ?? model.splitRatio
+                        if startRatio == nil { startRatio = base }
+                        // Clamped: a pane you can't see is a pane you can't get back.
+                        model.splitRatio = min(max(base + value.translation.width / total, 0.15), 0.85)
+                    }
+                    .onEnded { _ in startRatio = nil }
+            )
     }
 }
 
