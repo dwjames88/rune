@@ -57,7 +57,7 @@ All shipped. Kept here as the map of what landed where.
 **Deferred:** Apple Passwords / AutoFill — needs the paid Developer Program
 (same unlock as notarization for sharing builds).
 
-## Tier 2 — Flagship features of the field (aligned with Rune's ethos)
+## Tier 2 — ✅ DONE (v1.09). Flagship features of the field
 
 0. **On-device AI** — ✅ **DONE (v1.01)**. Apple's `FoundationModels` runs every
    AI feature by default: free, offline, and the page never leaves the Mac.
@@ -119,10 +119,13 @@ All shipped. Kept here as the map of what landed where.
    - **Named sessions** — put the current tabs away under a name; reopening
      loads them beside what you have, not instead of it. Managed in
      Settings ▸ Spaces, and they belong to the space they were saved in.
-   - **Reader mode** — ⏳ **still open**, and the one place the zero-deps rule
-     actively costs us: `article || main || body` is too crude for a real
-     reader, and doing it properly means hand-writing a Readability heuristic.
-     Deliberately not rushed into v1.1.
+   - **Reader mode** — ✅ **DONE (v1.09)**. ⇧⌘R. `Reader.swift` scores every
+     block that could be the story (length + paragraphs + commas, divided by
+     link density — a wall of links is a nav bar however long it is) and picks
+     the winner; the article is then set in *your* typography at a readable
+     measure. Readability.js is the standard answer and is a dependency, so
+     this is the same idea by hand and much smaller. It returns nil rather than
+     guessing: a reader showing you a menu is worse than no reader.
    - **Per-site settings** — ✅ **mostly DONE (v1.02)**. `SiteSettings` is one
      host-keyed store for zoom and blocking exceptions; the next per-site thing
      costs a field, not a file. Auto-PiP allowlist and per-site theme are the

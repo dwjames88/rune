@@ -949,6 +949,10 @@ private struct TabContent: View {
     var body: some View {
         if tab.urlString.isEmpty && !tab.isLoading {
             StartPage(model: model)
+        } else if let article = tab.reader {
+            // The web view isn't gone, just not on screen — it keeps running,
+            // and closing the reader puts it straight back.
+            ReaderView(article: article)
         } else {
             WebContainer(webView: tab.webView, onClick: onClick).id(tab.id)
                 // Claude, anchored to the page: hover a link for a summary,

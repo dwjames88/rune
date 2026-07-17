@@ -117,9 +117,27 @@ final class Tab: ObservableObject, Identifiable {
 
     @Published var customName: String?
 
+    /// The page, reduced to the article. Set = you're reading; the web view is
+    /// still alive behind it, still playing whatever it was playing.
+    @Published var reader: ReaderArticle?
+
     // Claude's ambient hooks into the page
     @Published var hoveredLink: HoverTarget?
     @Published var selection: SelectionTarget?
+
+    /// ⇧⌘R. Nil back means the heuristic didn't find an article, which is a
+    /// real answer: a reader showing you a nav bar is worse than no reader.
+    @discardableResult
+    func toggleReader() async -> Bool {
+        if reader != nil { reader = nil; return true }
+        let found = try? await webView.evaluateJavaScript(Reader.extractJS)
+        guard let json = found as? String, let data = json.data(using: .utf8),
+              let article = try? JSONDecoder().decode(ReaderArticle.self, from: data) else {
+            return false
+        }
+        reader = article
+        return true
+    }
 
     /// Readable text of the current page (for "ask about this page").
     func pageText() async -> String {

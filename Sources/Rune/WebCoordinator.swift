@@ -108,6 +108,8 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         guard let tab = tab(for: webView) else { return }
         model?.applyZoom(to: tab)
+        // Reader is a view of *this* page; a new one isn't it.
+        tab.reader = nil
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

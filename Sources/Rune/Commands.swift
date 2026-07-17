@@ -29,6 +29,7 @@ enum Command: String, CaseIterable, Identifiable {
     case toggleBlocking
     case toggleSplit
     case togglePanel
+    case toggleReader
     case saveSession
     case newSpace
     case nextSpace
@@ -69,6 +70,7 @@ enum Command: String, CaseIterable, Identifiable {
         case .toggleBlocking: "Block Content on This Site"
         case .toggleSplit: "Split View"
         case .togglePanel: "Show / Hide Panel"
+        case .toggleReader: "Reader"
         case .saveSession: "Save Tabs as Session"
         case .newSpace: "New Space"
         case .nextSpace: "Next Space"
@@ -110,6 +112,7 @@ enum Command: String, CaseIterable, Identifiable {
         case .toggleBlocking: "shield"
         case .toggleSplit: "rectangle.split.2x1"
         case .togglePanel: "sidebar.squares.right"
+        case .toggleReader: "doc.plaintext"
         case .saveSession: "tray.and.arrow.down"
         case .newSpace: "square.stack.badge.plus"
         case .nextSpace: "square.stack"
@@ -128,7 +131,7 @@ enum Command: String, CaseIterable, Identifiable {
     var menu: MenuSection {
         switch self {
         case .newTab, .closeTab, .undoCloseTab, .newPrivateWindow, .copyURL, .printPage, .pinTab: .file
-        case .reload, .findInPage, .zoomIn, .zoomOut, .zoomReset, .muteTab, .showDownloads, .toggleBlocking, .toggleSplit, .togglePanel,
+        case .reload, .findInPage, .zoomIn, .zoomOut, .zoomReset, .muteTab, .showDownloads, .toggleBlocking, .toggleSplit, .togglePanel, .toggleReader,
              .toggleSidebar, .togglePiP, .commandPalette, .askPage: .view
         case .goBack, .goForward: .history
         case .focusAddress, .nextTab, .previousTab, .newSpace, .nextSpace, .previousSpace, .saveSession: .navigate
@@ -164,6 +167,7 @@ enum Command: String, CaseIterable, Identifiable {
         case .toggleBlocking: ("", [])
         case .toggleSplit: ("\\", [.command, .option])
         case .togglePanel: ("e", [.command, .option])
+        case .toggleReader: ("r", [.command, .shift])
         case .saveSession: ("", [])
         case .newSpace: ("", [])
         case .nextSpace: ("]", [.command, .control])

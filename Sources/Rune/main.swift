@@ -390,6 +390,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .toggleBlocking: model.toggleBlockingForActiveSite()
         case .toggleSplit: model.toggleSplit()
         case .togglePanel: model.togglePanel()
+        case .toggleReader:
+            Task {
+                guard let tab = model.activeTab, await !tab.toggleReader() else { return }
+                NotificationCenter.default.post(name: .finderToast, object: "No article on this page")
+            }
         case .saveSession: model.saveSession()
         case .newSpace: model.switchTo(space: model.addSpace().id)
         case .nextSpace: model.selectAdjacentSpace(1)
