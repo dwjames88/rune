@@ -260,7 +260,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // Auto-PiP on leaving the app (the "window blur" case). App-level rather
     // than window-level so opening Settings or the palette doesn't trigger it.
     func applicationDidResignActive(_ notification: Notification) {
-        if settings.autoPiP == .tabSwitchAndAppSwitch { model.activeTab?.requestPiPIfPlaying() }
+        if settings.autoPiP == .tabSwitchAndAppSwitch {
+            model.activeTab?.requestPiPIfPlaying(audibleOnly: settings.autoPiPAudibleOnly)
+        }
     }
     func applicationDidBecomeActive(_ notification: Notification) {
         if settings.autoPiP == .tabSwitchAndAppSwitch, settings.autoPiPReturnInline {

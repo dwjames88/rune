@@ -425,10 +425,11 @@ private struct BrowsingPane: View {
                     ForEach(AutoPiPMode.allCases) { Text($0.label).tag($0) }
                 }
                 Toggle("Return video to the page when you come back", isOn: $settings.autoPiPReturnInline)
+                Toggle("Only videos playing sound", isOn: $settings.autoPiPAudibleOnly)
             } header: {
                 Text("Media")
             } footer: {
-                Text("A playing video pops into a floating window when you leave its tab. \"\(Command.togglePiP.title)\" in the View menu toggles it manually.")
+                Text("A playing video pops into a floating window when you leave its tab. \"\(Command.togglePiP.title)\" in the View menu toggles it manually. Sound-only keeps muted autoplay videos — hero banners, hover previews — from popping up uninvited.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {

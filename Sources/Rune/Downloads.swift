@@ -212,6 +212,12 @@ struct DownloadsPanel: View {
     @Binding var showing: Bool
     @EnvironmentObject var appearance: AppearanceStore
 
+    /// You opened this to glance at it, so it puts itself away. The pointer
+    /// resting on it is you still reading — the clock only runs while you're
+    /// not there, and starts over the moment you leave.
+    @State private var idle: Task<Void, Never>?
+    private static let patience = Duration.seconds(10)
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -245,7 +251,23 @@ struct DownloadsPanel: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: appearance.cornerRadius + 2))
         .overlay(RoundedRectangle(cornerRadius: appearance.cornerRadius + 2).strokeBorder(appearance.hairline))
         .shadow(color: .black.opacity(0.18), radius: 14, y: 6)
+        // Hovering covers clicking too: to press Clear or open a download you
+        // have to be on the panel, which is already the clock stopped.
+        .onHover { inside in inside ? hold() : countDown() }
+        .onAppear { countDown() }
+        .onDisappear { hold() }
     }
+
+    private func countDown() {
+        idle?.cancel()
+        idle = Task { @MainActor in
+            try? await Task.sleep(for: Self.patience)
+            guard !Task.isCancelled else { return }
+            showing = false
+        }
+    }
+
+    private func hold() { idle?.cancel(); idle = nil }
 }
 
 private struct DownloadRow: View {

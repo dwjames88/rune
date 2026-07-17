@@ -200,11 +200,14 @@ final class Tab: ObservableObject, Identifiable {
     // without transient user activation. Keep the W3C call as a fallback in
     // case WebKit ever ships it.
 
-    private static let enterPiPJS = """
+    private static func enterPiPJS(audibleOnly: Bool) -> String { """
     (function(){
       const vids=[...document.querySelectorAll('video')];
       if(vids.some(v=>v.webkitPresentationMode==='picture-in-picture')||document.pictureInPictureElement){return 'already-pip';}
-      const v=vids.find(v=>!v.paused&&!v.ended&&v.readyState>2);
+      const playing=v=>!v.paused&&!v.ended&&v.readyState>2;
+      const audible=v=>!v.muted&&v.volume>0;
+      const v=\(audibleOnly ? "vids.find(v=>playing(v)&&audible(v))"
+                            : "vids.find(v=>playing(v)&&audible(v))||vids.find(playing)");
       if(!v){return 'no-playing-video';}
       if(v.webkitSupportsPresentationMode&&v.webkitSupportsPresentationMode('picture-in-picture')){
         v.webkitSetPresentationMode('picture-in-picture');return 'webkit';
@@ -214,7 +217,7 @@ final class Tab: ObservableObject, Identifiable {
       }
       return 'unsupported';
     })();
-    """
+    """ }
 
     private static let exitPiPJS = """
     (function(){
@@ -225,8 +228,12 @@ final class Tab: ObservableObject, Identifiable {
     })();
     """
 
-    func requestPiPIfPlaying() {
-        webView.evaluateJavaScript(Self.enterPiPJS) { _, error in
+    /// The automatic path is picky on purpose: autoplay heroes and hover
+    /// previews are forced to start muted, so a video with sound is the one
+    /// you actually chose to watch. With `audibleOnly` off, sound still only
+    /// breaks the tie between several playing videos.
+    func requestPiPIfPlaying(audibleOnly: Bool) {
+        webView.evaluateJavaScript(Self.enterPiPJS(audibleOnly: audibleOnly)) { _, error in
             if let error { NSLog("Rune PiP enter failed: %@", error.localizedDescription) }
         }
     }
@@ -973,7 +980,9 @@ final class BrowserModel: ObservableObject {
         // view, one superview), so trade places instead.
         if new == otherSelection { swapPanes(); return }
 
-        if settings.autoPiP != .off, let current = activeTab { current.requestPiPIfPlaying() }
+        if settings.autoPiP != .off, let current = activeTab {
+            current.requestPiPIfPlaying(audibleOnly: settings.autoPiPAudibleOnly)
+        }
         if case .saved(let id) = new, openTabs[id] == nil, let saved = savedTab(id) {
             let tab = Tab(webView: makeWebView())
             tab.savedID = id

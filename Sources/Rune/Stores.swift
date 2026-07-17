@@ -254,6 +254,9 @@ final class SettingsStore: ObservableObject {
     @Published var autoPiP: AutoPiPMode { didSet { save() } }
     /// Bring a PiP'd video back into the page when you return to its tab.
     @Published var autoPiPReturnInline: Bool { didSet { save() } }
+    /// Auto-PiP only videos playing sound. Autoplay heroes and hover previews
+    /// are forced to start muted, so sound is the tell that you chose to watch.
+    @Published var autoPiPAudibleOnly: Bool { didSet { save() } }
     @Published var newTabBehavior: NewTabBehavior { didSet { save() } }
     @Published var homePageURL: String { didSet { save() } }
     @Published var newTabPlacement: NewTabPlacement { didSet { save() } }
@@ -294,6 +297,7 @@ final class SettingsStore: ObservableObject {
         // Optionals: absent in older settings.json
         var autoPiP: AutoPiPMode?
         var autoPiPReturnInline: Bool?
+        var autoPiPAudibleOnly: Bool?
         var newTabBehavior: NewTabBehavior?
         var homePageURL: String?
         var newTabPlacement: NewTabPlacement?
@@ -317,6 +321,7 @@ final class SettingsStore: ObservableObject {
         customEngines = saved?.customEngines ?? []
         autoPiP = saved?.autoPiP ?? .tabSwitch
         autoPiPReturnInline = saved?.autoPiPReturnInline ?? true
+        autoPiPAudibleOnly = saved?.autoPiPAudibleOnly ?? true
         newTabBehavior = saved?.newTabBehavior ?? .startPage
         homePageURL = saved?.homePageURL ?? ""
         newTabPlacement = saved?.newTabPlacement ?? .end
@@ -336,6 +341,7 @@ final class SettingsStore: ObservableObject {
     private func save() {
         Storage.saveJSON(Payload(searchEngine: searchEngine, customEngines: customEngines,
                                  autoPiP: autoPiP, autoPiPReturnInline: autoPiPReturnInline,
+                                 autoPiPAudibleOnly: autoPiPAudibleOnly,
                                  newTabBehavior: newTabBehavior, homePageURL: homePageURL,
                                  newTabPlacement: newTabPlacement,
                                  linkHoverEnabled: linkHoverEnabled, linkHoverDelay: linkHoverDelay,

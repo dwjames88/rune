@@ -793,6 +793,14 @@ private struct TabMenu: View {
 
 // MARK: - Content area
 
+/// Every overlay that opens wanting to be typed into. Address bars subscribe
+/// to drop focus when one appears — see the note on the toolbar's bar.
+@MainActor private let overlayOpened = Publishers.Merge3(
+    NotificationCenter.default.publisher(for: .showNewTabOverlay),
+    NotificationCenter.default.publisher(for: .showCommandPalette),
+    NotificationCenter.default.publisher(for: .showAskBar)
+).eraseToAnyPublisher()
+
 private struct ContentArea: View {
     @ObservedObject var model: BrowserModel
     let dispatch: (Command) -> Void
@@ -917,6 +925,11 @@ private struct ContentArea: View {
         .onReceive(NotificationCenter.default.publisher(for: .focusAddressBar)) {
             if $0.aimed(at: model), !model.isSplit { addressFocused = true }
         }
+        // ⌘T/⌘K/⌘E over a focused bar: the overlay asks for the keyboard, but
+        // an NSTextField that already holds first responder doesn't yield to a
+        // FocusState request — so the bar keeps every keystroke, selection and
+        // suggestions up, behind the overlay. It has to let go first.
+        .onReceive(overlayOpened) { if $0.aimed(at: model) { addressFocused = false } }
         .onReceive(NotificationCenter.default.publisher(for: .finderToast)) { note in
             toast = note.object as? String
             toastDismiss?.cancel()
@@ -1202,6 +1215,8 @@ private struct Pane: View {
         .onReceive(NotificationCenter.default.publisher(for: .focusAddressBar)) {
             if $0.aimed(at: model), model.isSplit, model.focusedPane == pane { focused = true }
         }
+        // Same as the toolbar bar: an opening overlay takes the keyboard.
+        .onReceive(overlayOpened) { if $0.aimed(at: model) { focused = false } }
     }
 
     /// Typing in a pane's bar is a way of being in that pane, so commands and
