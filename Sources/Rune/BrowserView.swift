@@ -810,22 +810,7 @@ private struct ContentArea: View {
     @State private var showDownloads = false
 
     private func updateSuggestions() {
-        guard addressFocused, !address.trimmingCharacters(in: .whitespaces).isEmpty else {
-            suggestions = []; return
-        }
-        let predictions = model.history.predict(address)
-        var out: [Suggestion] = []
-        // If you've clearly started typing a host you visit, that's the answer —
-        // lead with it so Return just goes there.
-        if let top = predictions.first, model.history.isConfident(address, top) {
-            out = [.history(top), .navigate(address)] + predictions.dropFirst().map(Suggestion.history)
-        } else {
-            out = [.navigate(address)] + predictions.map(Suggestion.history)
-        }
-        // Sounds like a description, not a destination — offer Claude.
-        let words = address.split(separator: " ").count
-        if model.ai.isAvailable, words >= 3 { out.append(.askAI(address)) }
-        suggestions = out
+        suggestions = addressFocused ? addressSuggestions(for: address, model: model) : []
     }
 
     var body: some View {
@@ -837,21 +822,25 @@ private struct ContentArea: View {
             HStack(spacing: 0) {
             ZStack(alignment: .top) {
                 appearance.windowBG
-                if model.isSplit {
-                    GeometryReader { geo in
-                        HStack(spacing: 0) {
-                            Pane(model: model, pane: .primary)
-                                .frame(width: max(0, (geo.size.width - SplitHandle.width) * model.splitRatio))
+                // There is always a first pane; splitting only adds a second.
+                // Rebuilding the first one to split would hand the same live web
+                // view to two containers at once, and the one on its way out
+                // re-parents the page into itself and takes it down as it goes —
+                // which is why closing a split used to leave an empty window
+                // until you switched tabs and back.
+                GeometryReader { geo in
+                    HStack(spacing: 0) {
+                        Pane(model: model, pane: .primary)
+                            .frame(width: model.isSplit
+                                   ? max(0, (geo.size.width - SplitHandle.width) * model.splitRatio)
+                                   : geo.size.width)
+                        if model.isSplit {
                             SplitHandle(model: model, total: geo.size.width)
                             Pane(model: model, pane: .secondary)
                                 .frame(maxWidth: .infinity)
                         }
-                        .frame(width: geo.size.width, height: geo.size.height)
                     }
-                } else if let tab = model.activeTab {
-                    TabContent(tab: tab, model: model)
-                } else {
-                    StartPage(model: model)
+                    .frame(width: geo.size.width, height: geo.size.height)
                 }
                 if showFind {
                     FindBar(model: model, isPresented: $showFind)
@@ -861,6 +850,7 @@ private struct ContentArea: View {
                 }
                 if showDownloads {
                     DownloadsPanel(downloads: model.downloads, showing: $showDownloads)
+                        .dismissOnEscape { showDownloads = false }
                         .padding(.top, 8).padding(.trailing, 12)
                         .frame(maxWidth: .infinity, alignment: .trailing)
                         .transition(.move(edge: .top).combined(with: .opacity))
@@ -870,7 +860,7 @@ private struct ContentArea: View {
                         .padding(.top, 24)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
-                if !suggestions.isEmpty {
+                if !suggestions.isEmpty, !model.isSplit {
                     SuggestionList(model: model, suggestions: suggestions, highlighted: highlighted) { index in
                         highlighted = index; activate()
                     }
@@ -923,8 +913,9 @@ private struct ContentArea: View {
         .onChange(of: address) { updateSuggestions() }
         .onChange(of: addressFocused) { updateSuggestions() }
         .onAppear { sync() }
+        // In a split, ⌘L belongs to the pane you're in — its bar handles it.
         .onReceive(NotificationCenter.default.publisher(for: .focusAddressBar)) {
-            if $0.aimed(at: model) { addressFocused = true }
+            if $0.aimed(at: model), !model.isSplit { addressFocused = true }
         }
         .onReceive(NotificationCenter.default.publisher(for: .finderToast)) { note in
             toast = note.object as? String
@@ -943,19 +934,102 @@ private struct ContentArea: View {
     }
 
     private func activate() {
-        let list = suggestions
-        guard !list.isEmpty else { model.navigate(address); addressFocused = false; return }
-        switch list[min(highlighted, list.count - 1)] {
-        case .navigate(let q): model.navigate(q)
-        case .history(let e): model.navigate(e.url)
-        case .askAI(let q):
-            Task {
-                if let url = try? await model.findInHistory(q) { model.navigate(url.absoluteString) }
-                else { model.navigate(q) }   // nothing matched — fall back to a search
-            }
-        }
+        activateAddress(address, suggestions: suggestions, highlighted: highlighted, model: model)
         addressFocused = false
         highlighted = 0
+    }
+}
+
+/// The address field itself. There is one of these because there is one of
+/// it: the toolbar wears it when a window shows a single page, and each pane
+/// wears its own in a split. Two copies would drift the day one gained a
+/// feature.
+struct AddressField: View {
+    @Binding var address: String
+    var focused: FocusState<Bool>.Binding
+    @Binding var highlighted: Int
+    let suggestionCount: Int
+    let activate: () -> Void
+    @EnvironmentObject var appearance: AppearanceStore
+
+    /// Host-only display ("pinkbike.com") while the field isn't focused.
+    private var compactHost: String {
+        guard let host = URL(string: address)?.host else { return address }
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
+    private var showCompact: Bool {
+        appearance.appearance.compactAddressBar && !focused.wrappedValue && !address.isEmpty
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass").font(.system(size: 11))
+                .foregroundStyle(appearance.secondaryText(on: appearance.chrome))
+            ZStack(alignment: .leading) {
+                TextField("Search or enter address", text: $address)
+                    .textFieldStyle(.plain)
+                    .foregroundStyle(appearance.chromeText)
+                    .focused(focused)
+                    .onSubmit(activate)
+                    .onChange(of: address) { highlighted = 0 }
+                    .onKeyPress(.downArrow) {
+                        guard suggestionCount > 0 else { return .ignored }
+                        highlighted = (highlighted + 1) % suggestionCount; return .handled
+                    }
+                    .onKeyPress(.upArrow) {
+                        guard suggestionCount > 0 else { return .ignored }
+                        highlighted = (highlighted - 1 + suggestionCount) % suggestionCount; return .handled
+                    }
+                    .onKeyPress(.escape) { focused.wrappedValue = false; return .handled }
+                    .opacity(showCompact ? 0 : 1)
+                if showCompact {
+                    Text(compactHost).lineLimit(1)
+                        .foregroundStyle(appearance.chromeText)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(appearance.windowBG)   // hide the field underneath
+                        .contentShape(Rectangle())
+                        .onTapGesture { focused.wrappedValue = true }
+                }
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(appearance.windowBG, in: RoundedRectangle(cornerRadius: appearance.cornerRadius))
+        .overlay(RoundedRectangle(cornerRadius: appearance.cornerRadius)
+            .strokeBorder(focused.wrappedValue ? appearance.accent : appearance.hairline, lineWidth: 1))
+    }
+}
+
+/// What to offer for what's been typed. Shared by every address bar there is,
+/// because they must all offer the same things.
+@MainActor
+func addressSuggestions(for address: String, model: BrowserModel) -> [Suggestion] {
+    guard !address.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
+    let predictions = model.history.predict(address)
+    var out: [Suggestion]
+    // If you've clearly started typing a host you visit, that's the answer —
+    // lead with it so Return just goes there.
+    if let top = predictions.first, model.history.isConfident(address, top) {
+        out = [.history(top), .navigate(address)] + predictions.dropFirst().map(Suggestion.history)
+    } else {
+        out = [.navigate(address)] + predictions.map(Suggestion.history)
+    }
+    // Sounds like a description, not a destination — offer Claude.
+    if model.ai.isAvailable, address.split(separator: " ").count >= 3 { out.append(.askAI(address)) }
+    return out
+}
+
+/// Act on what's typed, likewise shared.
+@MainActor
+func activateAddress(_ address: String, suggestions: [Suggestion], highlighted: Int, model: BrowserModel) {
+    guard !suggestions.isEmpty else { model.navigate(address); return }
+    switch suggestions[min(highlighted, suggestions.count - 1)] {
+    case .navigate(let q): model.navigate(q)
+    case .history(let e): model.navigate(e.url)
+    case .askAI(let q):
+        Task {
+            if let url = try? await model.findInHistory(q) { model.navigate(url.absoluteString) }
+            else { model.navigate(q) }   // nothing matched — fall back to a search
+        }
     }
 }
 
@@ -1032,12 +1106,19 @@ private struct SuggestionList: View {
 private struct SplitHandle: View {
     @ObservedObject var model: BrowserModel
     let total: Double
+    @EnvironmentObject var appearance: AppearanceStore
     @State private var startRatio: Double?
 
-    static let width: Double = 10
+    static let width: Double = 14
 
     var body: some View {
-        Divider()
+        ZStack {
+            Rectangle().fill(appearance.windowBG)
+            // A grip you can actually see, so the gutter reads as a control
+            // rather than a gap the two pages happen to leave.
+            RoundedRectangle(cornerRadius: 1.5).fill(appearance.hairline)
+                .frame(width: 3, height: 26)
+        }
             .frame(width: Self.width)
             .contentShape(Rectangle())
             .onHover { $0 ? NSCursor.resizeLeftRight.push() : NSCursor.pop() }
@@ -1066,12 +1147,41 @@ private struct Pane: View {
     let pane: BrowserModel.Pane
     @EnvironmentObject var appearance: AppearanceStore
 
+    // This pane's own address bar, and everything behind it. Two panes, two of
+    // these, both live at once — an address bar that rewrites itself when you
+    // glance at the other half is a bar for the window, not for the page.
+    @State private var address = ""
+    @FocusState private var focused: Bool
+    @State private var highlighted = 0
+    @State private var suggestions: [Suggestion] = []
+
     var body: some View {
-        Group {
-            if let tab = model.tab(for: pane) {
-                TabContent(tab: tab, model: model, onClick: { model.focusedPane = pane })
-            } else {
-                StartPage(model: model)
+        VStack(spacing: 0) {
+            // Only in a split. On its own, a pane is the window, and the window
+            // already has an address bar up top.
+            if model.isSplit {
+                AddressField(address: $address, focused: $focused, highlighted: $highlighted,
+                             suggestionCount: suggestions.count, activate: activate)
+                    .padding(.horizontal, 8).padding(.vertical, 5)
+                    .background(appearance.chrome)
+                Divider()
+            }
+            ZStack(alignment: .top) {
+                Group {
+                    if let tab = model.tab(for: pane) {
+                        TabContent(tab: tab, model: model, onClick: { focus() })
+                    } else {
+                        StartPage(model: model)
+                    }
+                }
+                // Inside the pane's stack, so it lands over this page and not
+                // over the neighbour's.
+                if !suggestions.isEmpty {
+                    SuggestionList(model: model, suggestions: suggestions, highlighted: highlighted) { index in
+                        highlighted = index; activate()
+                    }
+                    .padding(.horizontal, 12).padding(.top, 4)
+                }
             }
         }
         .overlay {
@@ -1080,7 +1190,39 @@ private struct Pane: View {
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture { model.focusedPane = pane }
+        .onTapGesture { focus() }
+        .onChange(of: model.selection(for: pane)) { sync() }
+        // The tab pushes URL changes that never touched this bar — link clicks,
+        // start-page searches, redirects.
+        .onReceive(urlPublisher) { if !focused, address != $0 { address = $0 } }
+        .onChange(of: address) { updateSuggestions() }
+        .onChange(of: focused) { if focused { focus() }; updateSuggestions() }
+        .onAppear { sync() }
+        // ⌘L aims at the window; only the pane you're in should answer.
+        .onReceive(NotificationCenter.default.publisher(for: .focusAddressBar)) {
+            if $0.aimed(at: model), model.isSplit, model.focusedPane == pane { focused = true }
+        }
+    }
+
+    /// Typing in a pane's bar is a way of being in that pane, so commands and
+    /// `navigate` — which both aim at the focused pane — land where you're looking.
+    private func focus() { model.focusedPane = pane }
+
+    private func sync() { address = model.tab(for: pane)?.urlString ?? "" }
+
+    private var urlPublisher: AnyPublisher<String, Never> {
+        model.tab(for: pane)?.$urlString.eraseToAnyPublisher() ?? Just("").eraseToAnyPublisher()
+    }
+
+    private func updateSuggestions() {
+        suggestions = focused ? addressSuggestions(for: address, model: model) : []
+    }
+
+    private func activate() {
+        focus()
+        activateAddress(address, suggestions: suggestions, highlighted: highlighted, model: model)
+        focused = false
+        highlighted = 0
     }
 }
 
@@ -1261,53 +1403,19 @@ private struct Toolbar: View {
         appearance.appearance.toolbarButtons.compactMap(Command.init(rawValue:))
     }
 
-    /// Host-only address display ("pinkbike.com") while the field isn't focused.
-    private var compactHost: String {
-        guard let host = URL(string: address)?.host else { return address }
-        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
-    }
-    private var showCompact: Bool {
-        appearance.appearance.compactAddressBar && !addressFocused.wrappedValue && !address.isEmpty
-    }
-
     var body: some View {
         HStack(spacing: 8) {
             ForEach(commands) { commandButton($0) }
 
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass").font(.system(size: 11))
-                    .foregroundStyle(appearance.secondaryText(on: appearance.chrome))
-                ZStack(alignment: .leading) {
-                    TextField("Search or enter address", text: $address)
-                        .textFieldStyle(.plain)
-                        .foregroundStyle(appearance.chromeText)
-                        .focused(addressFocused)
-                        .onSubmit(activate)
-                        .onChange(of: address) { highlighted = 0 }
-                        .onKeyPress(.downArrow) {
-                            guard suggestionCount > 0 else { return .ignored }
-                            highlighted = (highlighted + 1) % suggestionCount; return .handled
-                        }
-                        .onKeyPress(.upArrow) {
-                            guard suggestionCount > 0 else { return .ignored }
-                            highlighted = (highlighted - 1 + suggestionCount) % suggestionCount; return .handled
-                        }
-                        .onKeyPress(.escape) { addressFocused.wrappedValue = false; return .handled }
-                        .opacity(showCompact ? 0 : 1)
-                    if showCompact {
-                        Text(compactHost).lineLimit(1)
-                            .foregroundStyle(appearance.chromeText)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(appearance.windowBG)   // hide the field underneath
-                            .contentShape(Rectangle())
-                            .onTapGesture { addressFocused.wrappedValue = true }
-                    }
-                }
+            if !model.isSplit {
+                AddressField(address: $address, focused: addressFocused, highlighted: $highlighted,
+                             suggestionCount: suggestionCount, activate: activate)
+            } else {
+                // In a split the bars live in the panes, one each. A third one up
+                // here would have to pick a pane to speak for, which is the whole
+                // thing we just stopped doing.
+                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 10).padding(.vertical, 6)
-            .background(appearance.windowBG, in: RoundedRectangle(cornerRadius: appearance.cornerRadius))
-            .overlay(RoundedRectangle(cornerRadius: appearance.cornerRadius)
-                .strokeBorder(addressFocused.wrappedValue ? appearance.accent : appearance.hairline, lineWidth: 1))
         }
         .padding(.horizontal, 10).padding(.vertical, 7)
         .background(appearance.chrome)
