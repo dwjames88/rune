@@ -251,7 +251,10 @@ private struct FavoritesSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             SectionHeader(title: "Favorites", trailing: "\(model.favorites.count)/6")
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 6), spacing: 6) {
+            // A fixed row, not a flexible grid: the tiles and their gaps stay
+            // the same size at every sidebar width, and a sidebar too narrow
+            // for them truncates the row rather than squeezing it.
+            HStack(spacing: 6) {
                 ForEach(Array(model.favorites.enumerated()), id: \.element.id) { index, fav in
                     FaviconTile(saved: fav, selected: model.pane(showing: .saved(fav.id)) != nil)
                         .onTapGesture { model.select(.saved(fav.id)) }
@@ -263,11 +266,14 @@ private struct FavoritesSection: View {
                         .contextMenu { TabMenu(model: model, selection: .saved(fav.id), isFavorite: true) }
                 }
                 if model.favorites.isEmpty {
-                    Text("Drag here").font(appearance.font(10))
+                    Text("Drag here").font(appearance.type(.caption))
                         .foregroundStyle(appearance.sidebarSecondary)
-                        .frame(height: 34).gridCellColumns(6)
+                        .frame(height: 34)
                 }
+                Spacer(minLength: 0)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .clipped()
             .padding(3)
             .background(RoundedRectangle(cornerRadius: appearance.cornerRadius)
                 .fill(targeted ? appearance.accent.opacity(0.18) : .clear))

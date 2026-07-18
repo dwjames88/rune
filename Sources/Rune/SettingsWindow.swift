@@ -25,9 +25,11 @@ final class SettingsWindowController {
     func show() {
         if window == nil {
             let w = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 600, height: 620),
-                styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+                contentRect: NSRect(x: 0, y: 0, width: 780, height: 620),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                backing: .buffered, defer: false)
             w.title = "Rune Settings"
+            w.titlebarAppearsTransparent = true
             w.center(); w.setFrameAutosaveName("RuneSettings"); w.isReleasedWhenClosed = false
             w.contentViewController = NSHostingController(rootView: RuneSettingsView(
                 settings: settings, shortcuts: shortcuts, history: history,
@@ -48,27 +50,81 @@ private struct RuneSettingsView: View {
     @ObservedObject var sites: SiteSettings
     let model: () -> BrowserModel
 
-    enum Tab: String, CaseIterable { case appearance = "Appearance", presets = "Presets", spaces = "Spaces", browsing = "Browsing", ai = "AI", shortcuts = "Shortcuts" }
+    enum Tab: String, CaseIterable, Identifiable {
+        case appearance = "Appearance", presets = "Presets", spaces = "Spaces",
+             browsing = "Browsing", ai = "AI", shortcuts = "Shortcuts"
+        var id: String { rawValue }
+
+        /// The System Settings vocabulary: a white glyph on a tinted chip.
+        var icon: String {
+            switch self {
+            case .appearance: "paintbrush.fill"
+            case .presets: "swatchpalette.fill"
+            case .spaces: "square.stack.fill"
+            case .browsing: "globe"
+            case .ai: "sparkles"
+            case .shortcuts: "keyboard.fill"
+            }
+        }
+        var chip: Color {
+            switch self {
+            case .appearance: .blue
+            case .presets: .purple
+            case .spaces: .indigo
+            case .browsing: .green
+            case .ai: .pink
+            case .shortcuts: .gray
+            }
+        }
+    }
     @State private var tab: Tab = .appearance
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("", selection: $tab) {
-                ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Tab.allCases) { row($0) }
+                Spacer(minLength: 0)
             }
-            .pickerStyle(.segmented).labelsHidden().padding(12)
+            .padding(10)
+            .padding(.top, 28)   // under the window's traffic lights
+            .frame(width: 185)
+            .background(.ultraThinMaterial)
+
             Divider()
-            switch tab {
-            case .appearance: AppearancePane(appearance: appearance)
-            case .presets: PresetsPane(appearance: appearance)
-            case .spaces: SpacesPane(model: model(), appearance: appearance)
-            case .browsing: BrowsingPane(settings: settings, history: history,
-                                         sites: sites, model: model)
-            case .ai: AIPane(ai: ai, settings: settings)
-            case .shortcuts: ShortcutsPane(shortcuts: shortcuts)
+
+            Group {
+                switch tab {
+                case .appearance: AppearancePane(appearance: appearance)
+                case .presets: PresetsPane(appearance: appearance)
+                case .spaces: SpacesPane(model: model(), appearance: appearance)
+                case .browsing: BrowsingPane(settings: settings, history: history,
+                                             sites: sites, model: model)
+                case .ai: AIPane(ai: ai, settings: settings)
+                case .shortcuts: ShortcutsPane(shortcuts: shortcuts)
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 560, minHeight: 560)
+        .frame(minWidth: 740, minHeight: 560)
+    }
+
+    private func row(_ t: Tab) -> some View {
+        Button { tab = t } label: {
+            HStack(spacing: 8) {
+                Image(systemName: t.icon)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 22, height: 22)
+                    .background(t.chip.gradient, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                Text(t.rawValue)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(tab == t ? Color.primary.opacity(0.08) : .clear,
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 

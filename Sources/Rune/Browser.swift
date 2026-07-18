@@ -408,6 +408,10 @@ final class BrowserModel: ObservableObject {
         if let existing = configurations[profileID] { return existing }
         let config = WKWebViewConfiguration()
         config.websiteDataStore = dataStore(for: profileID)
+        // Without the Safari token, sites read the bare WebKit UA as an
+        // ancient browser — Google serves its legacy homepage, others their
+        // no-JS fallbacks. Rune is Safari's engine; say so.
+        config.applicationNameForUserAgent = "Version/26.0 Safari/605.1.15"
         config.defaultWebpagePreferences.allowsContentJavaScript = true
         config.preferences.isElementFullscreenEnabled = true
         config.preferences.setValue(true, forKey: "allowsPictureInPictureMediaPlayback")
