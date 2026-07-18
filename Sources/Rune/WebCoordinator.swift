@@ -126,6 +126,8 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
         model?.applyZoom(to: tab)
         // Reader is a view of *this* page; a new one isn't it.
         tab.reader = nil
+        // Nor is the old page's tint.
+        tab.themeColor = webView.themeColor
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -135,6 +137,22 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
         // per page, so the flag has to be re-applied to the fresh document.
         if let tab = tab(for: webView), tab.muted { tab.applyMuteToPage() }
         fetchFavicon(for: webView)
+        sampleHeaderColor(of: webView)
+    }
+
+    /// Arc's trick, done natively: when a page declares no theme-color, the
+    /// strip wears the page's actual rendered header — a thin snapshot of the
+    /// top of the viewport, averaged to one color.
+    private func sampleHeaderColor(of webView: WKWebView) {
+        guard webView.themeColor == nil, webView.bounds.width > 0 else { return }
+        let config = WKSnapshotConfiguration()
+        config.rect = CGRect(x: 0, y: 0, width: webView.bounds.width, height: 24)
+        config.afterScreenUpdates = false
+        webView.takeSnapshot(with: config) { [weak self] image, _ in
+            guard let self, let average = image?.averageColor,
+                  let tab = self.tab(for: webView), webView.themeColor == nil else { return }
+            tab.themeColor = average
+        }
     }
 
     private func tab(for webView: WKWebView) -> Tab? {

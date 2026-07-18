@@ -248,9 +248,7 @@ struct DownloadsPanel: View {
             }
         }
         .frame(maxWidth: 320)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: appearance.cornerRadius + 2))
-        .overlay(RoundedRectangle(cornerRadius: appearance.cornerRadius + 2).strokeBorder(appearance.hairline))
-        .shadow(color: .black.opacity(0.18), radius: 14, y: 6)
+        .runeSurface(appearance, .large)
         // Hovering covers clicking too: to press Clear or open a download you
         // have to be on the panel, which is already the clock stopped.
         .onHover { inside in inside ? hold() : countDown() }

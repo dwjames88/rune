@@ -131,6 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // one release too many once `browsers` holds it too — closing a private
         // window would take the whole app down with it.
         window.isReleasedWhenClosed = false
+        TitlebarRemover.strip(window)
         browsers.append((window, browserModel))
         return window
     }
@@ -281,11 +282,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func applyWindowChrome() {
-        let hidden = appearance.appearance.hideTrafficLights
         for browser in browsers {
-            for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
-                browser.window.standardWindowButton(kind)?.isHidden = hidden
-            }
+            TitlebarRemover.strip(browser.window)
         }
         // Custom app icon (nil = back to the bundle's Icon Composer icon).
         // Rendering is 1024px — only redo it when the icon tokens changed, not
@@ -413,5 +411,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .previousTab: model.selectAdjacentSession(-1)
         case .openSettings: settingsWindow.show()
         }
+    }
+}
+
+/// The titled window's dirty secret: an invisible 28pt strip across the top
+/// that draws nothing and owns every click. This removes it — the container
+/// view is hidden outright, the traffic lights are re-parented into the
+/// content view so they survive it, and dragging moves to the window
+/// background. Idempotent; safe to call again when the lights setting flips.
+@MainActor
+enum TitlebarRemover {
+    static func strip(_ window: NSWindow, showLights: Bool = false) {
+        // The whole container goes — including the system traffic lights.
+        // Re-parenting them was a losing fight (AppKit re-lays out its managed
+        // buttons whenever it likes, which is how they ended up at the bottom
+        // of the sidebar). Rune draws its own lights instead (TrafficLights).
+        window.standardWindowButton(.closeButton)?.superview?.superview?.isHidden = true
+        // Deliberately NOT movable-by-background: that setting turns every
+        // passive surface into a window drag — which is how the split handle
+        // stopped splitting. Dragging is granted surface-by-surface instead
+        // (WindowDragArea behind the strip, the sidebar, the pane bars).
+        window.isMovableByWindowBackground = false
+        // Native transparency: the window itself is clear glass; what you see
+        // through it is the behind-window blur, dimmed by the container fills.
+        window.isOpaque = false
+        window.backgroundColor = .clear
     }
 }

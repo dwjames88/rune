@@ -19,7 +19,10 @@ struct BrowserView: View {
                 if model.sidebarVisible && appearance.appearance.sidebarOnRight { Divider(); sidebar }
             }
             .animation(.easeInOut(duration: 0.18), value: model.sidebarVisible)
-            .background(appearance.windowBG)
+            .background(appearance.windowBG.opacity(appearance.containerOpacity))
+            // Fading the frost reveals the sharp glass beneath it — that's
+            // the whole blur dial.
+            .background(WindowBlur().opacity(appearance.appearance.blur / 100))
 
             if showAsk {
                 AskBar(model: model, ai: model.ai, isPresented: $showAsk)
@@ -30,6 +33,7 @@ struct BrowserView: View {
                                isPresented: $showPalette, mode: paletteMode)
             }
         }
+        .animation(Motion.arrive, value: showPalette)
         .animation(.easeOut(duration: 0.15), value: showAsk)
         .font(appearance.uiFont)
         .onReceive(NotificationCenter.default.publisher(for: .showCommandPalette)) {
@@ -47,11 +51,46 @@ struct BrowserView: View {
         .onReceive(NotificationCenter.default.publisher(for: .showAskBar)) {
             if $0.aimed(at: model) { showAsk = true }
         }
+        // The titlebar is gone (TitlebarRemover), but the window still
+        // advertises its old inset as safe area. Nothing is there — lay out
+        // from the true top edge.
+        .ignoresSafeArea(edges: .top)
     }
 
     private var sidebar: some View {
         Sidebar(model: model, dispatch: dispatch)
-            .frame(width: appearance.sidebarWidth).transition(.move(edge: .leading))
+            .frame(width: appearance.sidebarWidth)
+            .overlay(alignment: appearance.appearance.sidebarOnRight ? .leading : .trailing) {
+                SidebarResizeHandle()
+            }
+            .transition(.move(edge: .leading))
+    }
+}
+
+/// The sidebar's width is a drag, not a slider: grab its inner edge. The
+/// setting persists exactly as before — this is just the honest control for it.
+private struct SidebarResizeHandle: View {
+    @EnvironmentObject var appearance: AppearanceStore
+    @State private var startWidth: CGFloat?
+
+    var body: some View {
+        Rectangle().fill(Color.clear)
+            .frame(width: 8)
+            .contentShape(Rectangle())
+            .onHover { $0 ? NSCursor.resizeLeftRight.push() : NSCursor.pop() }
+            .gesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                    .onChanged { value in
+                        let base = startWidth ?? appearance.sidebarWidth
+                        if startWidth == nil { startWidth = base }
+                        let delta = appearance.appearance.sidebarOnRight
+                            ? -value.translation.width : value.translation.width
+                        // Clamped: a sidebar you can't find again is a bug,
+                        // not a preference.
+                        appearance.appearance.sidebarWidth = min(max(base + delta, 180), 420)
+                    }
+                    .onEnded { _ in startWidth = nil }
+            )
     }
 }
 
@@ -64,7 +103,13 @@ private struct Sidebar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Color.clear.frame(height: appearance.appearance.hideTrafficLights ? 8 : 28)
+            // Rune's own lights — the system's went with the titlebar.
+            if !appearance.appearance.hideTrafficLights {
+                TrafficLights()
+                    .padding(.leading, 12).padding(.top, 12).padding(.bottom, 8)
+            } else {
+                Color.clear.frame(height: 10)
+            }
 
             if model.isPrivate { privateBanner } else { SpaceBar(model: model, dispatch: dispatch) }
 
@@ -99,7 +144,14 @@ private struct Sidebar: View {
             }
             .foregroundStyle(appearance.sidebarSecondary).padding(8)
         }
-        .background(appearance.sidebarBG)
+        .background {
+            ZStack {
+                WindowDragArea()
+                appearance.sidebarBG.opacity(appearance.containerOpacity)
+                    .allowsHitTesting(false)
+            }
+        }
+        .overlay(Grain(percent: appearance.appearance.grain))
         .foregroundStyle(appearance.sidebarText)
     }
 
@@ -552,7 +604,7 @@ private struct RowBody<Icon: View, Trailing: View>: View {
     var body: some View {
         HStack(spacing: 8) {
             icon()
-            Text(name).lineLimit(1).font(appearance.font(13))
+            Text(name).lineLimit(1).font(appearance.type(.body))
             Spacer(minLength: 4)
             if let paneMark {
                 Image(systemName: paneMark == .primary ? "rectangle.lefthalf.filled"
@@ -639,11 +691,14 @@ private struct SectionHeader: View {
     var trailing: String? = nil
     @EnvironmentObject var appearance: AppearanceStore
     var body: some View {
+        // Micro-labels, fieldframes-style: tiny, tracked wide, all caps, with
+        // the count sitting quietly at the trailing edge. The hierarchy is the
+        // whitespace around them, not their weight.
         HStack {
-            Text(title).font(appearance.font(11, weight: .semibold))
-            if let trailing { Spacer(); Text(trailing).font(appearance.font(10)) }
+            Text(title.uppercased()).font(appearance.type(.caption)).tracking(1.3)
+            if let trailing { Spacer(); Text(trailing).font(appearance.type(.caption)).monospacedDigit() }
         }
-        .foregroundStyle(appearance.sidebarSecondary)
+        .foregroundStyle(appearance.sidebarSecondary.opacity(0.85))
         .padding(.horizontal, 8)
     }
 }
@@ -821,15 +876,30 @@ private struct ContentArea: View {
         suggestions = addressFocused ? addressSuggestions(for: address, model: model) : []
     }
 
+    /// The structural fork: the minimal strip carries only navigation and a
+    /// quiet address pill on a thin band above the page; attached keeps the
+    /// classic full-button bar.
+    private var floatingChrome: Bool { appearance.appearance.chromeStyle == "floating" }
+
     var body: some View {
         VStack(spacing: 0) {
-            Toolbar(model: model, dispatch: dispatch, address: $address, addressFocused: $addressFocused,
-                    highlighted: $highlighted, suggestionCount: suggestions.count,
-                    showDownloads: $showDownloads, activate: activate)
-            Divider()
+            // In a floating split the strip stands down — each pane carries
+            // its own chrome, Arc-style, and a third bar would speak for
+            // nobody.
+            if floatingChrome && !model.isSplit {
+                MinimalChrome(model: model, dispatch: dispatch, address: $address,
+                              addressFocused: $addressFocused, highlighted: $highlighted,
+                              suggestionCount: suggestions.count, activate: activate)
+                Divider()
+            } else if !floatingChrome {
+                Toolbar(model: model, dispatch: dispatch, address: $address, addressFocused: $addressFocused,
+                        highlighted: $highlighted, suggestionCount: suggestions.count,
+                        showDownloads: $showDownloads, activate: activate)
+                Divider()
+            }
             HStack(spacing: 0) {
             ZStack(alignment: .top) {
-                appearance.windowBG
+                appearance.windowBG.opacity(appearance.containerOpacity)
                 // There is always a first pane; splitting only adds a second.
                 // Rebuilding the first one to split would hand the same live web
                 // view to two containers at once, and the one on its way out
@@ -837,10 +907,14 @@ private struct ContentArea: View {
                 // which is why closing a split used to leave an empty window
                 // until you switched tabs and back.
                 GeometryReader { geo in
+                    // The card margins come out of the width the panes share —
+                    // otherwise the layout overflows and the window scrolls
+                    // sideways.
+                    let inset: CGFloat = floatingChrome && model.isSplit ? 16 : 0
                     HStack(spacing: 0) {
                         Pane(model: model, pane: .primary)
                             .frame(width: model.isSplit
-                                   ? max(0, (geo.size.width - SplitHandle.width) * model.splitRatio)
+                                   ? max(0, (geo.size.width - SplitHandle.width - inset) * model.splitRatio)
                                    : geo.size.width)
                         if model.isSplit {
                             SplitHandle(model: model, total: geo.size.width)
@@ -848,6 +922,9 @@ private struct ContentArea: View {
                                 .frame(maxWidth: .infinity)
                         }
                     }
+                    // The cards float on the window background with a margin
+                    // all round; the handle is the gap between them.
+                    .padding(floatingChrome && model.isSplit ? 8 : 0)
                     .frame(width: geo.size.width, height: geo.size.height)
                 }
                 if showFind {
@@ -872,16 +949,16 @@ private struct ContentArea: View {
                     SuggestionList(model: model, suggestions: suggestions, highlighted: highlighted) { index in
                         highlighted = index; activate()
                     }
-                    .padding(.horizontal, 44).padding(.top, 4)
+                    .frame(maxWidth: floatingChrome ? 640 : .infinity)
+                    .padding(.horizontal, floatingChrome ? 0 : 44)
+                    .padding(.top, 4)
                 }
                 if let toast {
                     Text(toast)
-                        .font(appearance.font(12, weight: .medium))
+                        .font(appearance.type(.label))
                         .foregroundStyle(appearance.chromeText)
                         .padding(.horizontal, 14).padding(.vertical, 8)
-                        .background(.regularMaterial, in: Capsule())
-                        .overlay(Capsule().strokeBorder(appearance.hairline))
-                        .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
+                        .runeSurface(appearance, .pill)
                         .padding(.top, 10)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
@@ -963,7 +1040,16 @@ struct AddressField: View {
     @Binding var highlighted: Int
     let suggestionCount: Int
     let activate: () -> Void
+    /// `.bar` draws its own box (the attached toolbar, a split pane's bar);
+    /// `.pill` is naked — the floating chrome's surface dresses it.
+    var style: Style = .bar
+    /// What the field sits on (the strip's page tint); ink keeps contrast.
+    var surface: Color? = nil
     @EnvironmentObject var appearance: AppearanceStore
+
+    enum Style { case bar, pill }
+
+    private var base: Color { surface ?? appearance.chrome }
 
     /// Host-only display ("pinkbike.com") while the field isn't focused.
     private var compactHost: String {
@@ -974,14 +1060,23 @@ struct AddressField: View {
         appearance.appearance.compactAddressBar && !focused.wrappedValue && !address.isEmpty
     }
 
+    /// The padlock: what the connection is, said quietly. Only meaningful when
+    /// an address is loaded and the field is at rest.
+    private var leadingSymbol: String {
+        guard !address.isEmpty, !focused.wrappedValue else { return "magnifyingglass" }
+        if address.hasPrefix("https://") { return "lock.fill" }
+        if address.hasPrefix("http://") { return "lock.open" }
+        return "magnifyingglass"
+    }
+
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass").font(.system(size: 11))
-                .foregroundStyle(appearance.secondaryText(on: appearance.chrome))
+            Image(systemName: leadingSymbol).font(.system(size: 11))
+                .foregroundStyle(appearance.secondaryText(on: base))
             ZStack(alignment: .leading) {
                 TextField("Search or enter address", text: $address)
                     .textFieldStyle(.plain)
-                    .foregroundStyle(appearance.chromeText)
+                    .foregroundStyle(appearance.text(on: base))
                     .focused(focused)
                     .onSubmit(activate)
                     .onChange(of: address) { highlighted = 0 }
@@ -996,19 +1091,30 @@ struct AddressField: View {
                     .onKeyPress(.escape) { focused.wrappedValue = false; return .handled }
                     .opacity(showCompact ? 0 : 1)
                 if showCompact {
-                    Text(compactHost).lineLimit(1)
-                        .foregroundStyle(appearance.chromeText)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(appearance.windowBG)   // hide the field underneath
-                        .contentShape(Rectangle())
-                        .onTapGesture { focused.wrappedValue = true }
+                    // A Button, not a tapped Text: the strip lives in the
+                    // window's titlebar region, where passive views belong to
+                    // window-dragging and only real controls get the click.
+                    Button { focused.wrappedValue = true } label: {
+                        Text(compactHost).lineLimit(1)
+                            .font(style == .pill ? appearance.type(.label) : appearance.type(.body))
+                            .tracking(style == .pill ? 0.6 : 0)
+                            // Primary ink on the tint — the host is the one
+                            // legible statement on the strip, Arc-style.
+                            .foregroundStyle(appearance.text(on: base))
+                            .frame(maxWidth: .infinity, alignment: style == .pill ? .center : .leading)
+                            .background(style == .pill ? Color.clear : appearance.windowBG)   // hide the field underneath
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
-        .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(appearance.windowBG, in: RoundedRectangle(cornerRadius: appearance.cornerRadius))
-        .overlay(RoundedRectangle(cornerRadius: appearance.cornerRadius)
-            .strokeBorder(focused.wrappedValue ? appearance.accent : appearance.hairline, lineWidth: 1))
+        .padding(.horizontal, style == .pill ? 14 : 10).padding(.vertical, style == .pill ? 8 : 6)
+        .background(style == .pill ? Color.clear : appearance.windowBG,
+                    in: RoundedRectangle(cornerRadius: appearance.radius(style == .pill ? .pill : .medium)))
+        .overlay(RoundedRectangle(cornerRadius: appearance.radius(style == .pill ? .pill : .medium))
+            .strokeBorder(focused.wrappedValue ? appearance.accent
+                          : (style == .pill ? .clear : appearance.hairline), lineWidth: 1))
     }
 }
 
@@ -1089,9 +1195,7 @@ private struct SuggestionList: View {
             }
         }
         .padding(5)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: appearance.cornerRadius + 2))
-        .overlay(RoundedRectangle(cornerRadius: appearance.cornerRadius + 2).strokeBorder(appearance.hairline))
-        .shadow(color: .black.opacity(0.18), radius: 14, y: 6)
+        .runeSurface(appearance, .large)
     }
 
     private func icon(_ s: Suggestion) -> String {
@@ -1126,7 +1230,9 @@ private struct SplitHandle: View {
 
     var body: some View {
         ZStack {
-            Rectangle().fill(appearance.windowBG)
+            // Clear on purpose: the window background (and its blur) is the
+            // gap between the cards.
+            Rectangle().fill(Color.clear)
             // A grip you can actually see, so the gutter reads as a control
             // rather than a gap the two pages happen to leave.
             RoundedRectangle(cornerRadius: 1.5).fill(appearance.hairline)
@@ -1168,16 +1274,43 @@ private struct Pane: View {
     @State private var highlighted = 0
     @State private var suggestions: [Suggestion] = []
 
+    private var floating: Bool { appearance.appearance.chromeStyle == "floating" }
+
     var body: some View {
         VStack(spacing: 0) {
             // Only in a split. On its own, a pane is the window, and the window
             // already has an address bar up top.
             if model.isSplit {
-                AddressField(address: $address, focused: $focused, highlighted: $highlighted,
-                             suggestionCount: suggestions.count, activate: activate)
+                if floating, let tab = model.tab(for: pane) {
+                    // The pane is a card, and the card wears its page.
+                    PaneBar(model: model, tab: tab, pane: pane, address: $address,
+                            focused: $focused, highlighted: $highlighted,
+                            suggestionCount: suggestions.count, activate: activate)
+                } else {
+                    HStack(spacing: 6) {
+                        AddressField(address: $address, focused: $focused, highlighted: $highlighted,
+                                     suggestionCount: suggestions.count, activate: activate)
+                        // A start-page pane has no PaneBar, but it still needs
+                        // a way out of the split.
+                        if floating {
+                            Button { model.closePane(pane) } label: {
+                                Image(systemName: "xmark").font(.system(size: 11, weight: .medium))
+                                    .frame(width: 22, height: 22).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(appearance.secondaryText(on: appearance.chrome))
+                        }
+                    }
                     .padding(.horizontal, 8).padding(.vertical, 5)
-                    .background(appearance.chrome)
-                Divider()
+                    .background {
+                        ZStack {
+                            WindowDragArea()
+                            appearance.chrome.opacity(appearance.containerOpacity)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    if !floating { Divider() }
+                }
             }
             ZStack(alignment: .top) {
                 Group {
@@ -1202,6 +1335,11 @@ private struct Pane: View {
                 Rectangle().fill(.black.opacity(0.06)).allowsHitTesting(false)
             }
         }
+        // In a floating split each pane is a card — rounded, discrete,
+        // sitting on the window background.
+        .clipShape(RoundedRectangle(
+            cornerRadius: floating && model.isSplit ? appearance.radius(.large) : 0,
+            style: .continuous))
         .contentShape(Rectangle())
         .onTapGesture { focus() }
         .onChange(of: model.selection(for: pane)) { sync() }
@@ -1238,6 +1376,65 @@ private struct Pane: View {
         activateAddress(address, suggestions: suggestions, highlighted: highlighted, model: model)
         focused = false
         highlighted = 0
+    }
+}
+
+/// One pane's header in a floating split — the page's own mini-chrome, the
+/// way Arc dresses each half: the pane's tint, its navigation, its address
+/// centered, and a close on the trailing edge. Observes its tab directly, so
+/// back/forward enable and the tint arrive live.
+private struct PaneBar: View {
+    @ObservedObject var model: BrowserModel
+    @ObservedObject var tab: Tab
+    let pane: BrowserModel.Pane
+    @Binding var address: String
+    var focused: FocusState<Bool>.Binding
+    @Binding var highlighted: Int
+    let suggestionCount: Int
+    let activate: () -> Void
+    @EnvironmentObject var appearance: AppearanceStore
+
+    private var surface: Color { tab.themeColor.map(Color.init(nsColor:)) ?? appearance.chrome }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            button("chevron.left", enabled: tab.canGoBack) { tab.webView.goBack() }
+            button("chevron.right", enabled: tab.canGoForward) { tab.webView.goForward() }
+            button("arrow.clockwise", enabled: true) { tab.webView.reload() }
+            Spacer(minLength: 0)
+            button("xmark", enabled: true) { model.closePane(pane) }
+        }
+        .overlay {
+            AddressField(address: $address, focused: focused, highlighted: $highlighted,
+                         suggestionCount: suggestionCount, activate: activate,
+                         style: .pill, surface: surface)
+                .frame(maxWidth: 360)
+        }
+        .padding(.horizontal, 6)
+        .frame(height: 34)
+        .background {
+            ZStack {
+                WindowDragArea()
+                surface.opacity(appearance.containerOpacity).allowsHitTesting(false)
+            }
+        }
+        .overlay(Grain(percent: appearance.appearance.grain))
+        .animation(Motion.update, value: tab.themeColor)
+        .foregroundStyle(appearance.text(on: surface))
+    }
+
+    /// Acting on a pane is being in it — every button focuses it first.
+    private func button(_ symbol: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            model.focusedPane = pane
+            action()
+        } label: {
+            Image(systemName: symbol).font(.system(size: 11, weight: .medium))
+                .frame(width: 22, height: 22).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .foregroundStyle(appearance.secondaryText(on: surface))
     }
 }
 
@@ -1368,7 +1565,8 @@ private struct StartPage: View {
             Spacer(); Spacer()
         }
         .padding(.horizontal, 24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity).background(appearance.startPageBG)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(appearance.startPageBG.opacity(appearance.containerOpacity))
         .onAppear { focused = true; refreshRecents() }
         // ⌘T landing on a start page that's already open: same freshness as a
         // new one.
@@ -1428,7 +1626,8 @@ private struct Toolbar: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            ForEach(commands) { commandButton($0) }
+            ForEach(commands) { CommandButton(model: model, command: $0, dispatch: dispatch,
+                                              showDownloads: $showDownloads) }
 
             if !model.isSplit {
                 AddressField(address: $address, focused: addressFocused, highlighted: $highlighted,
@@ -1441,14 +1640,30 @@ private struct Toolbar: View {
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 7)
-        .background(appearance.chrome)
+        .background {
+            ZStack {
+                WindowDragArea()
+                appearance.chrome.opacity(appearance.containerOpacity)
+                    .allowsHitTesting(false)
+            }
+        }
         .foregroundStyle(appearance.chromeText)
     }
+}
 
-    /// Any command renders as a toolbar button; a few keep live state (disabled
-    /// arrows, reload-becomes-stop, download progress).
-    @ViewBuilder
-    private func commandButton(_ command: Command) -> some View {
+/// Any command renders as a chrome button; a few keep live state (disabled
+/// arrows, reload-becomes-stop, download progress). One implementation for
+/// both chromes — the attached bar and the floating cluster.
+private struct CommandButton: View {
+    @ObservedObject var model: BrowserModel
+    let command: Command
+    let dispatch: (Command) -> Void
+    @Binding var showDownloads: Bool
+    /// What the button sits on; its ink keeps contrast against it.
+    var surface: Color? = nil
+    @EnvironmentObject var appearance: AppearanceStore
+
+    var body: some View {
         switch command {
         case .showDownloads:
             DownloadsButton(downloads: model.downloads, showing: $showDownloads)
@@ -1471,6 +1686,188 @@ private struct Toolbar: View {
             Image(systemName: symbol).font(.system(size: 13, weight: .medium)).frame(width: 26, height: 24)
         }
         .buttonStyle(.plain)
-        .foregroundStyle(appearance.secondaryText(on: appearance.chrome))
+        .foregroundStyle(appearance.secondaryText(on: surface ?? appearance.chrome))
+    }
+}
+
+/// The minimal strip: a thin band above the page carrying exactly two things —
+/// back/forward, and a quiet address pill. Nothing overlaps the page, nothing
+/// else asks for room. The hierarchy is fieldframes': one legible statement
+/// (the address), micro-scale ghost controls beside it, whitespace doing the
+/// rest. Which side the navigation sits on is yours to choose.
+/// The strip, wearing the page: it tints itself with the site's theme color,
+/// the way Arc's bar does. Navigation cluster on one side, shield and split
+/// on the other (swappable), the host centered between them. On the start
+/// page it wears the chrome color.
+private struct MinimalChrome: View {
+    @ObservedObject var model: BrowserModel
+    let dispatch: (Command) -> Void
+    @Binding var address: String
+    var addressFocused: FocusState<Bool>.Binding
+    @Binding var highlighted: Int
+    let suggestionCount: Int
+    let activate: () -> Void
+    @EnvironmentObject var appearance: AppearanceStore
+
+    /// The active page's color, pushed as WebKit discovers it.
+    @State private var tint: NSColor?
+
+    private var navOnLeft: Bool { appearance.appearance.navPlacement != "right" }
+    private var surface: Color { tint.map(Color.init(nsColor:)) ?? appearance.chrome }
+
+    /// The lights live in the sidebar; when it's away (or on the right), the
+    /// strip carries them so the window keeps its verbs.
+    private var stripCarriesLights: Bool {
+        !appearance.appearance.hideTrafficLights
+            && (!model.sidebarVisible || appearance.appearance.sidebarOnRight)
+    }
+
+    private var themePublisher: AnyPublisher<NSColor?, Never> {
+        model.activeTab?.$themeColor.eraseToAnyPublisher() ?? Just(nil).eraseToAnyPublisher()
+    }
+
+    private var nav: some View {
+        HStack(spacing: 2) {
+            CommandButton(model: model, command: .goBack, dispatch: dispatch,
+                          showDownloads: .constant(false), surface: surface)
+            CommandButton(model: model, command: .goForward, dispatch: dispatch,
+                          showDownloads: .constant(false), surface: surface)
+            CommandButton(model: model, command: .reload, dispatch: dispatch,
+                          showDownloads: .constant(false), surface: surface)
+        }
+    }
+
+    /// Arc's right-hand pair, in Rune's terms: the shield and the split.
+    private var utilities: some View {
+        HStack(spacing: 2) {
+            CommandButton(model: model, command: .toggleBlocking, dispatch: dispatch,
+                          showDownloads: .constant(false), surface: surface)
+            CommandButton(model: model, command: .toggleSplit, dispatch: dispatch,
+                          showDownloads: .constant(false), surface: surface)
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if stripCarriesLights { TrafficLights() }
+            if navOnLeft { nav } else { utilities }
+            Spacer(minLength: 0)
+            if navOnLeft { utilities } else { nav }
+        }
+        // Centered on the window, not on what's left between the clusters —
+        // and therefore in register with the suggestion panel below.
+        .overlay {
+            if !model.isSplit {
+                AddressField(address: $address, focused: addressFocused, highlighted: $highlighted,
+                             suggestionCount: suggestionCount, activate: activate,
+                             style: .pill, surface: surface)
+                    .frame(maxWidth: addressFocused.wrappedValue ? 640 : 420)
+                    .background((addressFocused.wrappedValue ? appearance.hover : .clear),
+                                in: RoundedRectangle(cornerRadius: appearance.radius(.pill)))
+                    .animation(Motion.arrive, value: addressFocused.wrappedValue)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 3)
+        .frame(height: 36)
+        .background {
+            ZStack {
+                WindowDragArea()
+                surface.opacity(appearance.containerOpacity).allowsHitTesting(false)
+            }
+        }
+        .overlay(Grain(percent: appearance.appearance.grain))
+        .animation(Motion.update, value: tint)
+        .foregroundStyle(appearance.text(on: surface))
+        .onReceive(themePublisher) { tint = $0 }
+        .onChange(of: model.selection) { tint = model.activeTab?.themeColor }
+        .onChange(of: model.focusedPane) { tint = model.activeTab?.themeColor }
+    }
+}
+
+/// A surface you can drag the window by — granted deliberately, never by
+/// blanket `isMovableByWindowBackground` (which turned the split handle into
+/// a window drag). AppKit-native: the view simply asks the window to move.
+struct WindowDragArea: NSViewRepresentable {
+    final class DragView: NSView {
+        override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
+        override var mouseDownCanMoveWindow: Bool { false }
+    }
+    func makeNSView(context: Context) -> NSView { DragView() }
+    func updateNSView(_ view: NSView, context: Context) {}
+}
+
+/// The desktop, behind frosted glass: a behind-window material that the
+/// container fills sit on. Transparency lives in the fills, not the window —
+/// buttons, icons and text never fade.
+struct WindowBlur: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.blendingMode = .behindWindow
+        view.material = .underWindowBackground
+        view.state = .active
+        return view
+    }
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
+}
+
+/// Rune's own traffic lights. The system's lived in the titlebar, and the
+/// titlebar is gone — these are the same three verbs drawn by us: honest
+/// circles that glyph on hover, and they sit wherever the chrome wants them.
+struct TrafficLights: View {
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 7) {
+            light("#FF5F57", "xmark") { NSApp.keyWindow?.performClose(nil) }
+            light("#FEBC2E", "minus") { NSApp.keyWindow?.miniaturize(nil) }
+            light("#28C840", "arrow.up.left.and.arrow.down.right") { NSApp.keyWindow?.zoom(nil) }
+        }
+        .onHover { hovering = $0 }
+    }
+
+    private func light(_ hex: String, _ symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            ZStack {
+                Circle().fill(Color(hex: hex) ?? .gray)
+                    .overlay(Circle().strokeBorder(.black.opacity(0.12)))
+                if hovering {
+                    Image(systemName: symbol)
+                        .font(.system(size: 6.5, weight: .bold))
+                        .foregroundStyle(.black.opacity(0.55))
+                }
+            }
+            .frame(width: 12, height: 12)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Film grain over the chrome, Arc-style: one tiled noise image at whisper
+/// opacity. Texture, not information — it never intercepts a click.
+struct Grain: View {
+    let percent: Double
+
+    nonisolated static let tile: NSImage = {
+        let size = 128
+        var bytes = [UInt8](repeating: 0, count: size * size)
+        for i in bytes.indices { bytes[i] = UInt8.random(in: 0...255) }
+        guard let provider = CGDataProvider(data: Data(bytes) as CFData),
+              let cg = CGImage(width: size, height: size, bitsPerComponent: 8, bitsPerPixel: 8,
+                               bytesPerRow: size, space: CGColorSpaceCreateDeviceGray(),
+                               bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+                               provider: provider, decode: nil, shouldInterpolate: false,
+                               intent: .defaultIntent)
+        else { return NSImage() }
+        return NSImage(cgImage: cg, size: NSSize(width: size, height: size))
+    }()
+
+    var body: some View {
+        if percent > 0 {
+            Image(nsImage: Self.tile)
+                .resizable(resizingMode: .tile)
+                .opacity(percent / 100)
+                .blendMode(.overlay)
+                .allowsHitTesting(false)
+        }
     }
 }

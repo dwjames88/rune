@@ -118,10 +118,9 @@ struct CommandPalette: View {
                 }
             }
             .frame(width: 560)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(appearance.hairline))
-            .shadow(color: .black.opacity(0.25), radius: 30, y: 10)
+            .runeSurface(appearance, .large)
             .padding(.top, 90)
+            .transition(.scale(scale: 0.97, anchor: .top).combined(with: .opacity))
         }
         .onAppear { focused = true; items = computeItems() }
         .onKeyPress(.downArrow) { move(1); return .handled }

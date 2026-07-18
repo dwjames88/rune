@@ -29,6 +29,12 @@ struct Appearance: Codable, Equatable {
     var toolbarButtons: [String] = ["toggleSidebar", "goBack", "goForward", "reload", "showDownloads"]
     /// Show just the site's host in the address bar until you click it.
     var compactAddressBar = true
+    /// "floating" — the minimal strip: back/forward and a quiet address pill
+    /// on a thin band above the page, nothing else. "attached" — the classic
+    /// toolbar with the full button set.
+    var chromeStyle = "floating"
+    /// Which side of the address bar the back/forward buttons sit on.
+    var navPlacement = "left"
 
     // Start page
     var startPageGreeting = ""          // empty = the "Rune" wordmark
@@ -38,6 +44,12 @@ struct Appearance: Codable, Equatable {
 
     // Window
     var hideTrafficLights = false
+    /// Container-fill opacity over the glass, percent (70–100).
+    var windowOpacity: Double = 100
+    /// How frosted the glass is, percent (0 = sharp see-through).
+    var blur: Double = 100
+    /// Film grain over the chrome, percent (0 = none).
+    var grain: Double = 8
 
     // App icon: "default" = the bundled Icon Composer icon; a hex on either
     // token switches to a natively-rendered variant (see AppIconRenderer).
@@ -52,9 +64,9 @@ struct Appearance: Codable, Equatable {
         case accent, sidebarColor, chromeColor, backgroundColor
         case fontName, fontSize, textColor
         case sidebarWidth, cornerRadius, sidebarOnRight
-        case toolbarButtons, compactAddressBar
+        case toolbarButtons, compactAddressBar, chromeStyle, navPlacement
         case startPageGreeting, startPageShowFavorites, startPageShowRecents, startPageBackground
-        case hideTrafficLights
+        case hideTrafficLights, windowOpacity, blur, grain
         case appIconBackground, appIconGlyph
     }
 
@@ -75,11 +87,16 @@ struct Appearance: Codable, Equatable {
         sidebarOnRight = try c.decodeIfPresent(Bool.self, forKey: .sidebarOnRight) ?? d.sidebarOnRight
         toolbarButtons = try c.decodeIfPresent([String].self, forKey: .toolbarButtons) ?? d.toolbarButtons
         compactAddressBar = try c.decodeIfPresent(Bool.self, forKey: .compactAddressBar) ?? d.compactAddressBar
+        chromeStyle = try c.decodeIfPresent(String.self, forKey: .chromeStyle) ?? d.chromeStyle
+        navPlacement = try c.decodeIfPresent(String.self, forKey: .navPlacement) ?? d.navPlacement
         startPageGreeting = try c.decodeIfPresent(String.self, forKey: .startPageGreeting) ?? d.startPageGreeting
         startPageShowFavorites = try c.decodeIfPresent(Bool.self, forKey: .startPageShowFavorites) ?? d.startPageShowFavorites
         startPageShowRecents = try c.decodeIfPresent(Bool.self, forKey: .startPageShowRecents) ?? d.startPageShowRecents
         startPageBackground = try c.decodeIfPresent(String.self, forKey: .startPageBackground) ?? d.startPageBackground
         hideTrafficLights = try c.decodeIfPresent(Bool.self, forKey: .hideTrafficLights) ?? d.hideTrafficLights
+        windowOpacity = try c.decodeIfPresent(Double.self, forKey: .windowOpacity) ?? d.windowOpacity
+        blur = try c.decodeIfPresent(Double.self, forKey: .blur) ?? d.blur
+        grain = try c.decodeIfPresent(Double.self, forKey: .grain) ?? d.grain
         appIconBackground = try c.decodeIfPresent(String.self, forKey: .appIconBackground) ?? d.appIconBackground
         appIconGlyph = try c.decodeIfPresent(String.self, forKey: .appIconGlyph) ?? d.appIconGlyph
     }
@@ -174,6 +191,9 @@ final class AppearanceStore: ObservableObject {
     var hover: Color { Color.primary.opacity(0.05) }
     var cornerRadius: CGFloat { appearance.cornerRadius }
     var sidebarWidth: CGFloat { appearance.sidebarWidth }
+    /// How solid the container fills are over the behind-window blur.
+    /// Transparency belongs to the backgrounds, never to controls or content.
+    var containerOpacity: Double { appearance.windowOpacity / 100 }
 
     // MARK: Contrast-aware text
 
@@ -203,6 +223,81 @@ final class AppearanceStore: ObservableObject {
             : .custom(appearance.fontName, size: size)
     }
 
+    // MARK: Type ramp
+
+    /// The five voices Rune speaks in. Ad-hoc point sizes had crept into every
+    /// view; a role is a decision made once. Sizes hang off the one font-size
+    /// setting, so turning that knob scales the whole app together.
+    enum TypeRole {
+        case caption    // counts, hints, URLs in trailing position
+        case label      // section headers, chips, secondary rows
+        case body       // rows, fields, controls — the setting itself
+        case title      // panel and overlay titles
+        case display    // the start page greeting
+    }
+
+    func type(_ role: TypeRole) -> Font {
+        let base = appearance.fontSize
+        switch role {
+        case .caption: return font(base - 3)
+        case .label: return font(base - 2, weight: .medium)
+        case .body: return font(base)
+        case .title: return font(base + 1, weight: .semibold)
+        case .display: return font(base * 3, weight: .semibold)
+        }
+    }
+
+    // MARK: Radius scale
+
+    /// Three steps hung off the one radius knob, so the setting still means
+    /// something and nested corners stay concentric.
+    enum RadiusRole { case small, medium, large, pill }
+    func radius(_ role: RadiusRole) -> CGFloat {
+        switch role {
+        case .small: max(3, appearance.cornerRadius - 3)
+        case .medium: appearance.cornerRadius
+        case .large: appearance.cornerRadius + 4
+        case .pill: 999
+        }
+    }
+}
+
+// MARK: - Motion
+
+/// Rune's two gestures: things that arrive, spring; things that update, ease.
+/// One vocabulary instead of a scatter of durations.
+enum Motion {
+    static let arrive = Animation.spring(response: 0.32, dampingFraction: 0.82)
+    static let update = Animation.easeOut(duration: 0.14)
+}
+
+// MARK: - Surface
+
+/// The one floating surface. Palette, panels, bars, toasts — every overlay is
+/// this material, this border, this shadow. Seven hand-rolled recipes had
+/// grown here; a surface you can name is a surface you can keep consistent.
+private struct RuneSurface: ViewModifier {
+    let radius: CGFloat
+    @EnvironmentObject var appearance: AppearanceStore
+
+    func body(content: Content) -> some View {
+        content
+            .background(.regularMaterial,
+                        in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .strokeBorder(appearance.hairline))
+            .shadow(color: .black.opacity(0.18), radius: 16, y: 7)
+    }
+}
+
+extension View {
+    /// Wear the shared overlay surface at the given radius role.
+    func runeSurface(_ appearance: AppearanceStore, _ role: AppearanceStore.RadiusRole = .large) -> some View {
+        modifier(RuneSurface(radius: appearance.radius(role)))
+    }
+}
+
+extension AppearanceStore {
     /// Installed font family names, for the picker.
     static let availableFonts: [String] =
         ["system"] + NSFontManager.shared.availableFontFamilies.sorted()

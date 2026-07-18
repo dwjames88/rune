@@ -43,9 +43,10 @@ struct FindBar: View {
                 .foregroundStyle(appearance.secondaryText(on: appearance.chrome))
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(.regularMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(missing ? Color.red.opacity(0.5) : appearance.hairline))
-        .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
+        .runeSurface(appearance, .pill)
+        // The one thing the shared surface can't say: nothing matched.
+        .overlay(RoundedRectangle(cornerRadius: appearance.radius(.pill))
+            .strokeBorder(Color.red.opacity(missing ? 0.5 : 0)))
         .dismissOnEscape { close() }
         .onAppear { focused = true }
         // ⌘F while the bar is already up re-focuses and selects, as everywhere else.

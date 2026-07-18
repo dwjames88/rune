@@ -18,15 +18,22 @@ final class FinderWindowController {
         if window == nil {
             let w = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 960, height: 620),
-                styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                 backing: .buffered, defer: false)
             w.title = "Finder"
+            w.titlebarAppearsTransparent = true
+            w.titleVisibility = .hidden
             w.minSize = NSSize(width: 720, height: 440)
             w.center(); w.setFrameAutosaveName("RuneFinder"); w.isReleasedWhenClosed = false
             let hosting = NSHostingController(rootView: FinderView(model: model, finder: model.finder)
+                .overlay(alignment: .topLeading) {
+                    TrafficLights().padding(.leading, 12).padding(.top, 10)
+                }
                 .environmentObject(appearance))
             hosting.sizingOptions = []
             w.contentViewController = hosting
+            // Same rule as the browser windows: no invisible titlebar region.
+            TitlebarRemover.strip(w)
             window = w
         }
         window?.makeKeyAndOrderFront(nil)
@@ -126,6 +133,9 @@ struct FinderView: View {
     private var rail: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
+                // Clearance for the window's traffic lights, which sit over
+                // the rail's top-left corner now that the titlebar is gone.
+                Color.clear.frame(height: 18)
                 railSection("Library", entries: [
                     ("sparkles.rectangle.stack", "All", Filter.all, finder.items.count),
                     ("photo", "Images", .images, finder.items.filter { $0.kind == .image }.count),

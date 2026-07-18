@@ -113,12 +113,27 @@ private struct AppearancePane: View {
                 Text("Auto contrast picks black or white text for the best WCAG contrast against each background.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Section("Layout") {
-                sliderRow("Sidebar width", value: a.sidebarWidth, range: 180...360, step: 5, suffix: "px")
+            Section {
                 sliderRow("Corner radius", value: a.cornerRadius, range: 0...16, step: 1, suffix: "px")
                 Toggle("Sidebar on the right", isOn: a.sidebarOnRight)
+                sliderRow("Transparency", value: a.windowOpacity, range: 70...100, step: 1, suffix: "%")
+                sliderRow("Blur", value: a.blur, range: 0...100, step: 5, suffix: "%")
+                sliderRow("Grain", value: a.grain, range: 0...20, step: 1, suffix: "%")
+            } header: {
+                Text("Layout")
+            } footer: {
+                Text("Resize the sidebar by dragging its inner edge. Transparency thins the container fills over the glass; blur is how frosted the glass is.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section {
+                Picker("Chrome", selection: a.chromeStyle) {
+                    Text("Minimal — navigation and the address").tag("floating")
+                    Text("Classic — the full toolbar").tag("attached")
+                }
+                Picker("Back / Forward", selection: a.navPlacement) {
+                    Text("Left of the address").tag("left")
+                    Text("Right of the address").tag("right")
+                }
                 Toggle("Compact address bar", isOn: a.compactAddressBar)
                 ForEach(Command.allCases) { command in
                     Toggle(isOn: toolbarBinding(command)) {
@@ -131,7 +146,7 @@ private struct AppearancePane: View {
             } header: {
                 Text("Toolbar")
             } footer: {
-                Text("Checked commands appear as buttons before the address bar. Compact address bar shows just the site until you click it.")
+                Text("Minimal chrome is a thin strip above the page: back/forward and the address, nothing else — the checked commands below apply to the classic toolbar. Compact address bar shows just the site until you click it.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Start Page") {

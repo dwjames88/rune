@@ -117,6 +117,10 @@ final class Tab: ObservableObject, Identifiable {
 
     @Published var customName: String?
 
+    /// The page's declared theme color (meta theme-color, else what WebKit
+    /// sees under the page) — what the chrome tints itself with, Arc-style.
+    @Published var themeColor: NSColor?
+
     /// The page, reduced to the article. Set = you're reading; the web view is
     /// still alive behind it, still playing whatever it was playing.
     @Published var reader: ReaderArticle?
@@ -164,6 +168,12 @@ final class Tab: ObservableObject, Identifiable {
             if let self { let s = $0?.absoluteString ?? ""; if s != self.urlString { self.urlString = s } }
         }.store(in: &cancellables)
         webView.publisher(for: \.isLoading).removeDuplicates().assign(to: &$isLoading)
+        // A declared meta theme-color always wins; pages without one get their
+        // rendered header sampled instead (WebCoordinator, on load finish).
+        webView.publisher(for: \.themeColor)
+            .compactMap { $0 }
+            .sink { [weak self] in self?.themeColor = $0 }
+            .store(in: &cancellables)
         webView.publisher(for: \.canGoBack).removeDuplicates().assign(to: &$canGoBack)
         webView.publisher(for: \.canGoForward).removeDuplicates().assign(to: &$canGoForward)
     }
@@ -750,6 +760,14 @@ final class BrowserModel: ObservableObject {
     func closeSplit() {
         splitSelection = nil
         focusedPane = .primary
+    }
+
+    /// Close one half of a split, keeping the other on screen. Closing the
+    /// primary half promotes the secondary into its place.
+    func closePane(_ pane: Pane) {
+        guard isSplit else { return }
+        if pane == .primary { selection = splitSelection }
+        closeSplit()
     }
 
     /// A web view has one superview, so the same tab can't be in both panes.
@@ -1429,5 +1447,22 @@ extension NSImage {
     var png: Data? {
         guard let tiff = tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { return nil }
         return rep.representation(using: .png, properties: [:])
+    }
+
+    /// The image reduced to one color — drawn into a single pixel and read
+    /// back. Feeds the strip's header sampling.
+    var averageColor: NSColor? {
+        guard let tiff = tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+              let cg = rep.cgImage else { return nil }
+        var pixel = [UInt8](repeating: 0, count: 4)
+        guard let context = CGContext(data: &pixel, width: 1, height: 1,
+                                      bitsPerComponent: 8, bytesPerRow: 4,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        context.interpolationQuality = .medium
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return NSColor(red: CGFloat(pixel[0]) / 255, green: CGFloat(pixel[1]) / 255,
+                       blue: CGFloat(pixel[2]) / 255, alpha: 1)
     }
 }
