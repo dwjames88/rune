@@ -56,7 +56,9 @@ scripts/dev-run.sh          # build + launch as a .app (WKWebView needs a bundle
 - [ ] **Auto Picture-in-Picture** — hook is wired (`Tab.requestPiPIfPlaying` on switch); make it robust
 - [ ] **Links-as-apps, fully** — persistent pinned apps, per-app state, smooth switching
 - [ ] **Settings for everything** — theming, layout, sidebar side/width, new-tab behavior
-- [ ] Security UI — padlock, certificate sheet, bad-cert interstitial
+- [x] Security UI — padlock, certificate sheet, bad-cert interstitial
+  (additive only: system TLS validation is untouched, and the interstitial has
+  no "proceed anyway")
 
 ## Layout
 

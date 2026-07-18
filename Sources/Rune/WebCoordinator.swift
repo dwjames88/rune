@@ -126,8 +126,28 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
         model?.applyZoom(to: tab)
         // Reader is a view of *this* page; a new one isn't it.
         tab.reader = nil
-        // Nor is the old page's tint.
+        // Nor is the old page's tint, nor its security verdict.
         tab.themeColor = webView.themeColor
+        tab.securityFailure = nil
+    }
+
+    /// TLS said no. The system already refused the connection — this only
+    /// gives the refusal a face. There is deliberately no "proceed anyway":
+    /// security UI here is additive, never an override.
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
+                 withError error: Error) {
+        let e = error as NSError
+        let certCodes = [NSURLErrorServerCertificateUntrusted,
+                         NSURLErrorServerCertificateHasBadDate,
+                         NSURLErrorServerCertificateHasUnknownRoot,
+                         NSURLErrorServerCertificateNotYetValid,
+                         NSURLErrorClientCertificateRejected,
+                         NSURLErrorSecureConnectionFailed]
+        guard e.domain == NSURLErrorDomain, certCodes.contains(e.code),
+              let tab = tab(for: webView) else { return }
+        let failing = (e.userInfo[NSURLErrorFailingURLErrorKey] as? URL)?.host
+        tab.securityFailure = .init(host: failing ?? webView.url?.host ?? "this site",
+                                    message: e.localizedDescription)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

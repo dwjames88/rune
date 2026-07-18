@@ -71,11 +71,25 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleIconName</key><string>Rune</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
+    <key>CFBundleURLTypes</key>
+    <array>
+      <dict>
+        <key>CFBundleURLName</key><string>Web Address</string>
+        <key>CFBundleURLSchemes</key>
+        <array><string>http</string><string>https</string></array>
+      </dict>
+    </array>
     <key>UTExportedTypeDeclarations</key>
     <array>
       <dict>
         <key>UTTypeIdentifier</key><string>com.dwjames.Rune.tab</string>
         <key>UTTypeDescription</key><string>Rune Tab</string>
+        <key>UTTypeConformsTo</key><array><string>public.data</string></array>
+        <key>UTTypeTagSpecification</key><dict/>
+      </dict>
+      <dict>
+        <key>UTTypeIdentifier</key><string>com.dwjames.Rune.finderItem</string>
+        <key>UTTypeDescription</key><string>Rune Finder Item</string>
         <key>UTTypeConformsTo</key><array><string>public.data</string></array>
         <key>UTTypeTagSpecification</key><dict/>
       </dict>

@@ -1,5 +1,29 @@
 # Rune → Figma component library — build map
 
+> **🔶 v1.1 OVERHAUL SYNC — PARTIAL (2026-07-18, run rune-ds-002).** Stopped by
+> the Starter-plan MCP call quota. Done: **Section Header** (15:23) restyled to
+> the fieldframes micro-label (tracked caps, bound Font/Size/2XS) · **Address
+> Bar** set (20:35) gained `Mode=Pill Rest` (44:101) and `Mode=Pill Focused`
+> (44:104), bindings carried from the cloned variants · **Minimal Strip**
+> component set (46:330) in Organisms at (40,660): `Tint=Chrome` (45:101,
+> verified) + `Tint=Page` (46:316, dark sampled-header look).
+> **2026-07-18 later:** pill fix ✅ — 46:321 (the Address Bar instance inside
+> 46:316) now has no fill + white 18% stroke; both Minimal Strip tints verified.
+> **Quota note:** the MCP limit belongs to the Starter TEAM that owns the file —
+> reconnecting a different account does not reset it. To finish: move the file
+> to a paid team, or wait for the quota window.
+> **Next when calls are available:** 1) Pane Bar organism (dark strip at 520w,
+> nav + transparent ring pill 300w + trailing ✕, top radius 12, in Organisms at
+> (40,900)); 2) Security Popover organism (lock + host title + "Encrypted
+> connection" body + CERTIFICATE CHAIN micro-label with indented seal rows);
+> 3) Security Interstitial organism (orange broken lock, "This connection isn't
+> private", tracked host, Go Back — no proceed); 4) Settings Sidebar Row
+> molecule (tinted icon chip + label, selected fill); 5) screens pass.
+> Keep binding to the owner's "Rune" collection (VariableCollectionId:13:15) —
+> sizes map: 2XS=10 XS=11 S=12 M=13 L=14 XL=16.
+> File now uses real SF Pro/SF Mono (Inter note below is outdated); SF Mono
+> is NOT loadable via API on this machine — don't mutate SF Mono text nodes.
+
 > **✅ BUILT (2026-07-14, run `rune-ds-001`).** Layout in the file:
 > **Branding** page = owner's brand work + the Tokens sheet (14:18).
 > **Assets** page = the library, smallest→largest sections: 🧩 Atoms (Favicon

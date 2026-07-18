@@ -97,6 +97,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSUpdateDynamicServices()
         FinderQuickAction.installIfNeeded()
 
+        // The first minute of a public build: offer default-browser once,
+        // after the window has had a moment to be a browser.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { self.offerDefaultBrowser() }
+    }
+
+    /// Asked exactly once, ever — and never when Rune already is the default.
+    /// macOS puts up its own confirmation on top of this, which is the real
+    /// consent; this is just Rune raising its hand.
+    private func offerDefaultBrowser() {
+        let key = "rune.offeredDefaultBrowser"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.set(true, forKey: key)
+        if let http = URL(string: "http://example.com"),
+           let current = NSWorkspace.shared.urlForApplication(toOpen: http),
+           current == Bundle.main.bundleURL { return }
+        let alert = NSAlert()
+        alert.messageText = "Make Rune your default browser?"
+        alert.informativeText = "Links from other apps will open here — in their own window, so they never barge into your tabs. macOS will ask you to confirm."
+        alert.addButton(withTitle: "Make Default")
+        alert.addButton(withTitle: "Not Now")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        Task {
+            try? await NSWorkspace.shared.setDefaultApplication(
+                at: Bundle.main.bundleURL, toOpenURLsWithScheme: "http")
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {

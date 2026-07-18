@@ -37,18 +37,18 @@ struct LinkSummaryPopover: View {
             HStack(spacing: 6) {
                 Image(systemName: "sparkles").font(.system(size: 10)).foregroundStyle(appearance.accent)
                 Text(target.url.host ?? target.url.absoluteString)
-                    .font(appearance.font(11, weight: .semibold)).lineLimit(1)
+                    .font(appearance.type(.label)).lineLimit(1)
                 Spacer(minLength: 0)
             }
             Group {
                 if let summary {
-                    Text(summary).font(appearance.font(12))
+                    Text(summary).font(appearance.type(.body))
                 } else if let error {
-                    Text(error).font(appearance.font(11)).foregroundStyle(.secondary)
+                    Text(error).font(appearance.type(.label)).foregroundStyle(.secondary)
                 } else {
                     HStack(spacing: 6) {
                         ProgressView().controlSize(.small).scaleEffect(0.6)
-                        Text("Reading…").font(appearance.font(11)).foregroundStyle(.secondary)
+                        Text("Reading…").font(appearance.type(.label)).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -56,9 +56,7 @@ struct LinkSummaryPopover: View {
         }
         .padding(10)
         .frame(maxWidth: 300, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(appearance.hairline))
-        .shadow(color: .black.opacity(0.18), radius: 12, y: 4)
+        .runeSurface(appearance, .medium)
         .task(id: target.url) { await load() }
     }
 
@@ -111,27 +109,26 @@ struct SelectionActions: View {
             if let result {
                 Divider()
                 ScrollView {
-                    Text(result).font(appearance.font(12))
+                    Text(result).font(appearance.type(.body))
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxHeight: 180)
             }
             if let error {
-                Text(error).font(appearance.font(11)).foregroundStyle(.secondary)
+                Text(error).font(appearance.type(.label)).foregroundStyle(.secondary)
             }
         }
         .padding(10)
         .frame(maxWidth: result == nil ? 300 : 360, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(appearance.hairline))
-        .shadow(color: .black.opacity(0.18), radius: 12, y: 4)
+        .runeSurface(appearance, .medium)
+        .animation(Motion.update, value: result)
     }
 
     private func action(_ title: String, _ icon: String, run: @escaping () async -> Void) -> some View {
         Button {
             Task { await run() }
         } label: {
-            Label(title, systemImage: icon).font(appearance.font(11))
+            Label(title, systemImage: icon).font(appearance.type(.label))
                 .padding(.horizontal, 8).padding(.vertical, 5)
                 .background(appearance.hover, in: Capsule())
         }
@@ -186,7 +183,7 @@ struct AskBar: View {
                 Divider()
                 ScrollView {
                     Text(error ?? answer)
-                        .font(appearance.font(13))
+                        .font(appearance.type(.body))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
                         .padding(14)
@@ -195,9 +192,7 @@ struct AskBar: View {
             }
         }
         .frame(maxWidth: 620)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(appearance.hairline))
-        .shadow(color: .black.opacity(0.22), radius: 24, y: 8)
+        .runeSurface(appearance, .large)
         .padding(.top, 12)
         .onAppear { focused = true }
         .dismissOnEscape { close() }

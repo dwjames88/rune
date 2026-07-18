@@ -1,4 +1,5 @@
 import Combine
+import Security
 import SwiftUI
 import WebKit
 
@@ -1051,7 +1052,11 @@ struct AddressField: View {
     var style: Style = .bar
     /// What the field sits on (the strip's page tint); ink keeps contrast.
     var surface: Color? = nil
+    /// The active tab's trust, fetched when the padlock is clicked — a
+    /// closure so this dumb view never has to observe a tab.
+    var trust: () -> SecTrust? = { nil }
     @EnvironmentObject var appearance: AppearanceStore
+    @State private var showingSecurity = false
 
     enum Style { case bar, pill }
 
@@ -1077,8 +1082,24 @@ struct AddressField: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: leadingSymbol).font(.system(size: 11))
-                .foregroundStyle(appearance.secondaryText(on: base))
+            // The padlock answers questions when there's a connection to ask
+            // about; otherwise it's just the glyph.
+            if !address.isEmpty, !focused.wrappedValue, address.hasPrefix("http") {
+                Button { showingSecurity = true } label: {
+                    Image(systemName: leadingSymbol).font(.system(size: 11))
+                        .foregroundStyle(appearance.secondaryText(on: base))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Connection details")
+                .popover(isPresented: $showingSecurity, arrowEdge: .bottom) {
+                    SecurityPopover(host: compactHost,
+                                    secure: address.hasPrefix("https://"), trust: trust())
+                }
+            } else {
+                Image(systemName: leadingSymbol).font(.system(size: 11))
+                    .foregroundStyle(appearance.secondaryText(on: base))
+            }
             ZStack(alignment: .leading) {
                 TextField("Search or enter address", text: $address)
                     .textFieldStyle(.plain)
@@ -1121,6 +1142,95 @@ struct AddressField: View {
         .overlay(RoundedRectangle(cornerRadius: appearance.radius(style == .pill ? .pill : .medium))
             .strokeBorder(focused.wrappedValue ? appearance.accent
                           : (style == .pill ? .clear : appearance.hairline), lineWidth: 1))
+    }
+}
+
+/// The padlock, opened: what this connection is, in words — and the
+/// certificate chain macOS accepted for it. Read-only on purpose; Rune
+/// reports the system's verdict and never overrides it.
+struct SecurityPopover: View {
+    let host: String
+    let secure: Bool
+    let trust: SecTrust?
+    @EnvironmentObject var appearance: AppearanceStore
+
+    private var chain: [String] {
+        guard let trust,
+              let certs = SecTrustCopyCertificateChain(trust) as? [SecCertificate] else { return [] }
+        return certs.compactMap { SecCertificateCopySubjectSummary($0) as String? }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: secure ? "lock.fill" : "lock.open")
+                    .foregroundStyle(secure ? appearance.accent : .orange)
+                Text(host).font(appearance.type(.title)).lineLimit(1)
+            }
+            if secure {
+                Text("Encrypted connection. macOS validated the certificate against the system trust store.")
+                    .font(appearance.type(.body)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !chain.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("CERTIFICATE CHAIN").font(appearance.type(.caption)).tracking(1.2)
+                            .foregroundStyle(.secondary)
+                        ForEach(Array(chain.enumerated()), id: \.offset) { i, name in
+                            HStack(spacing: 5) {
+                                Image(systemName: i == 0 ? "checkmark.seal.fill" : "seal")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(i == 0 ? appearance.accent : .secondary)
+                                Text(name).font(appearance.type(.label)).lineLimit(1)
+                            }
+                            .padding(.leading, CGFloat(i) * 12)
+                        }
+                    }
+                }
+            } else {
+                Text("Not encrypted. Anything sent to this site can be read or changed in transit.")
+                    .font(appearance.type(.body)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(14)
+        .frame(width: 320, alignment: .leading)
+    }
+}
+
+/// TLS refused the connection; this is the refusal, readable. The only exit
+/// is back — there is no "proceed anyway", because Rune never asks you to
+/// overrule a failed certificate check.
+struct SecurityInterstitial: View {
+    let failure: Tab.SecurityFailure
+    let goBack: () -> Void
+    @EnvironmentObject var appearance: AppearanceStore
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Image(systemName: "lock.trianglebadge.exclamationmark")
+                .font(.system(size: 40))
+                .foregroundStyle(.orange)
+            Text("This connection isn't private")
+                .font(appearance.font(22, weight: .semibold))
+                .foregroundStyle(appearance.contentText)
+            Text(failure.host.uppercased()).font(appearance.type(.caption)).tracking(1.4)
+                .foregroundStyle(appearance.secondaryText(on: appearance.windowBG))
+            Text(failure.message)
+                .font(appearance.type(.body))
+                .foregroundStyle(appearance.secondaryText(on: appearance.windowBG))
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 420)
+            Button("Go Back", action: goBack)
+                .buttonStyle(.borderedProminent).tint(appearance.accent)
+                .padding(.top, 6)
+            Text("macOS couldn't verify this site's certificate. Rune never proceeds past a failed check.")
+                .font(appearance.type(.caption))
+                .foregroundStyle(appearance.secondaryText(on: appearance.windowBG))
+            Spacer(); Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(appearance.windowBG.opacity(appearance.containerOpacity))
     }
 }
 
@@ -1295,7 +1405,8 @@ private struct Pane: View {
                 } else {
                     HStack(spacing: 6) {
                         AddressField(address: $address, focused: $focused, highlighted: $highlighted,
-                                     suggestionCount: suggestions.count, activate: activate)
+                                     suggestionCount: suggestions.count, activate: activate,
+                                     trust: { model.tab(for: pane)?.serverTrust })
                         // A start-page pane has no PaneBar, but it still needs
                         // a way out of the split.
                         if floating {
@@ -1413,7 +1524,8 @@ private struct PaneBar: View {
         .overlay {
             AddressField(address: $address, focused: focused, highlighted: $highlighted,
                          suggestionCount: suggestionCount, activate: activate,
-                         style: .pill, surface: surface)
+                         style: .pill, surface: surface,
+                         trust: { tab.serverTrust })
                 .frame(maxWidth: 360)
         }
         .padding(.horizontal, 6)
@@ -1449,7 +1561,14 @@ private struct TabContent: View {
     @ObservedObject var model: BrowserModel
     var onClick: (() -> Void)?
     var body: some View {
-        if tab.urlString.isEmpty && !tab.isLoading {
+        if let failure = tab.securityFailure {
+            SecurityInterstitial(failure: failure) {
+                // A provisional failure never committed, so the page you were
+                // on is still right here — clearing the verdict reveals it.
+                // Navigating would walk history one entry too far back.
+                tab.securityFailure = nil
+            }
+        } else if tab.urlString.isEmpty && !tab.isLoading {
             StartPage(model: model)
         } else if let article = tab.reader {
             // The web view isn't gone, just not on screen — it keeps running,
@@ -1548,6 +1667,14 @@ private struct StartPage: View {
                 .frame(maxWidth: 560)
                 .padding(.top, 8)
             }
+            // The first sixty seconds: two hints for a profile that has never
+            // browsed. History's first entry retires them for good.
+            if model.history.entries.isEmpty && !model.isPrivate {
+                Text("⌘K runs any command · ⌘T opens the address bar · drag a tab onto the shelf to pin it")
+                    .font(appearance.type(.caption)).tracking(0.4)
+                    .foregroundStyle(appearance.secondaryText(on: appearance.startPageBG))
+                    .padding(.top, 2)
+            }
             if a.startPageShowRecents && !recents.isEmpty {
                 VStack(spacing: 2) {
                     ForEach(recents) { entry in
@@ -1637,7 +1764,8 @@ private struct Toolbar: View {
 
             if !model.isSplit {
                 AddressField(address: $address, focused: addressFocused, highlighted: $highlighted,
-                             suggestionCount: suggestionCount, activate: activate)
+                             suggestionCount: suggestionCount, activate: activate,
+                             trust: { model.activeTab?.serverTrust })
             } else {
                 // In a split the bars live in the panes, one each. A third one up
                 // here would have to pick a pane to speak for, which is the whole
@@ -1766,7 +1894,8 @@ private struct MinimalChrome: View {
             if !model.isSplit {
                 AddressField(address: $address, focused: addressFocused, highlighted: $highlighted,
                              suggestionCount: suggestionCount, activate: activate,
-                             style: .pill, surface: surface)
+                             style: .pill, surface: surface,
+                             trust: { model.activeTab?.serverTrust })
                     .frame(maxWidth: addressFocused.wrappedValue ? 640 : 420)
                     .background((addressFocused.wrappedValue ? appearance.hover : .clear),
                                 in: RoundedRectangle(cornerRadius: appearance.radius(.pill)))

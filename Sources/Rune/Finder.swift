@@ -277,6 +277,24 @@ final class FinderStore: ObservableObject {
         guard let i = folders.firstIndex(where: { $0.id == id }) else { return }
         folders[i].name = name; persistFolders()
     }
+
+    /// File an item into a folder (membership is metadata; the file never moves).
+    func file(_ itemID: UUID, into folderID: UUID) {
+        guard var item = items.first(where: { $0.id == itemID }),
+              !item.folderIDs.contains(folderID) else { return }
+        item.folderIDs.append(folderID)
+        update(item)
+    }
+
+    func remove(_ itemID: UUID, from folderID: UUID) {
+        guard var item = items.first(where: { $0.id == itemID }) else { return }
+        item.folderIDs.removeAll { $0 == folderID }
+        update(item)
+    }
+
+    func count(in folderID: UUID) -> Int {
+        items.count { $0.folderIDs.contains(folderID) }
+    }
     /// Delete a folder; items keep existing (membership is just metadata).
     func deleteFolder(_ id: UUID) {
         folders.removeAll { $0.id == id }

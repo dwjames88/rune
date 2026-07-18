@@ -121,6 +121,17 @@ final class Tab: ObservableObject, Identifiable {
     /// sees under the page) — what the chrome tints itself with, Arc-style.
     @Published var themeColor: NSColor?
 
+    /// The connection's trust, as the system evaluated it for WebKit. Feeds
+    /// the padlock's certificate sheet; Rune never re-decides it.
+    @Published var serverTrust: SecTrust?
+    /// A TLS failure that stopped a navigation — what the interstitial shows.
+    @Published var securityFailure: SecurityFailure?
+
+    struct SecurityFailure: Equatable {
+        var host: String
+        var message: String
+    }
+
     /// The page, reduced to the article. Set = you're reading; the web view is
     /// still alive behind it, still playing whatever it was playing.
     @Published var reader: ReaderArticle?
@@ -173,6 +184,9 @@ final class Tab: ObservableObject, Identifiable {
         webView.publisher(for: \.themeColor)
             .compactMap { $0 }
             .sink { [weak self] in self?.themeColor = $0 }
+            .store(in: &cancellables)
+        webView.publisher(for: \.serverTrust)
+            .sink { [weak self] in self?.serverTrust = $0 }
             .store(in: &cancellables)
         webView.publisher(for: \.canGoBack).removeDuplicates().assign(to: &$canGoBack)
         webView.publisher(for: \.canGoForward).removeDuplicates().assign(to: &$canGoForward)

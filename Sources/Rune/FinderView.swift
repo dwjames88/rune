@@ -58,6 +58,7 @@ struct FinderView: View {
     @State private var selectedID: UUID?
     @State private var toast: String?
     @State private var toastDismiss: Task<Void, Never>?
+    @State private var importTargeted = false
 
     enum Filter: Equatable {
         case all, images, videos, starred
@@ -101,12 +102,10 @@ struct FinderView: View {
         .overlay(alignment: .top) {
             if let toast {
                 Text(toast)
-                    .font(appearance.font(12, weight: .medium))
+                    .font(appearance.type(.label))
                     .foregroundStyle(appearance.chromeText)
                     .padding(.horizontal, 14).padding(.vertical, 8)
-                    .background(.regularMaterial, in: Capsule())
-                    .overlay(Capsule().strokeBorder(appearance.hairline))
-                    .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
+                    .runeSurface(appearance, .pill)
                     .padding(.top, 10)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
@@ -270,28 +269,52 @@ struct FinderView: View {
                     }
                 }
                 return true
+            } isTargeted: { importTargeted = $0 }
+            .overlay {
+                if importTargeted {
+                    RoundedRectangle(cornerRadius: appearance.radius(.medium))
+                        .strokeBorder(appearance.accent, lineWidth: 2)
+                        .padding(6)
+                        .allowsHitTesting(false)
+                }
             }
+        }
+        // The keyboard's half of "Move to Trash".
+        .onDeleteCommand {
+            guard let item = selected else { return }
+            finder.trash(item)
+            selectedID = nil
         }
     }
 
     private var emptyState: some View {
         VStack(spacing: 10) {
             Spacer()
-            Image(systemName: "sparkles.rectangle.stack")
+            Image(systemName: emptyIsFolder ? "folder" : "sparkles.rectangle.stack")
                 .font(.system(size: 34))
                 .foregroundStyle(appearance.secondaryText(on: appearance.windowBG))
-            Text(finder.items.isEmpty ? "Nothing saved yet" : "No matches")
-                .font(appearance.font(15, weight: .semibold))
+            Text(finder.items.isEmpty ? "Nothing saved yet"
+                 : emptyIsFolder ? "This folder is empty" : "No matches")
+                .font(appearance.type(.title))
                 .foregroundStyle(appearance.contentText)
             if finder.items.isEmpty {
                 Text("Right-click any image → Save to Rune Finder\n⌥S saves the image under your cursor · ⇧⌘S collects a whole page")
-                    .font(appearance.font(12))
+                    .font(appearance.type(.label))
                     .multilineTextAlignment(.center)
+                    .foregroundStyle(appearance.secondaryText(on: appearance.windowBG))
+            } else if emptyIsFolder {
+                Text("Drag any item onto the folder in the rail to file it here.")
+                    .font(appearance.type(.label))
                     .foregroundStyle(appearance.secondaryText(on: appearance.windowBG))
             }
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var emptyIsFolder: Bool {
+        if case .folder = filter { return true }
+        return false
     }
 }
 
@@ -349,10 +372,14 @@ private struct FinderCard: View {
                 Spacer(minLength: 0)
             }
         }
+        .padding(6)
+        .background(RoundedRectangle(cornerRadius: appearance.radius(.medium))
+            .fill(hovering ? appearance.hover : .clear))
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { open() }
         .onTapGesture { select() }
         .onHover { hovering = $0 }
+        .draggable(FinderItemDrag(id: item.id))
         .contextMenu {
             Button("Open Source Page") { open() }
             Button("Reveal in macOS Finder") {
@@ -361,6 +388,26 @@ private struct FinderCard: View {
             Divider()
             Button(item.star > 0 ? "Remove Star" : "Star") {
                 var updated = item; updated.star = item.star > 0 ? 0 : 5; finder.update(updated)
+            }
+            if !finder.folders.isEmpty {
+                // The same multi-membership the drag offers, spelled out.
+                Menu("Folders") {
+                    ForEach(finder.folders) { folder in
+                        Button {
+                            if item.folderIDs.contains(folder.id) {
+                                finder.remove(item.id, from: folder.id)
+                            } else {
+                                finder.file(item.id, into: folder.id)
+                            }
+                        } label: {
+                            if item.folderIDs.contains(folder.id) {
+                                Label(folder.name, systemImage: "checkmark")
+                            } else {
+                                Text(folder.name)
+                            }
+                        }
+                    }
+                }
             }
             Divider()
             Button("Move to Trash", role: .destructive) { finder.trash(item) }
@@ -378,6 +425,7 @@ private struct FinderFolderRow: View {
     @EnvironmentObject var appearance: AppearanceStore
     @State private var renaming = false
     @State private var draft = ""
+    @State private var targeted = false
 
     var body: some View {
         Group {
@@ -395,13 +443,26 @@ private struct FinderFolderRow: View {
                         Text(folder.name).font(appearance.font(12)).lineLimit(1)
                             .foregroundStyle(appearance.text(on: appearance.sidebarBG))
                         Spacer(minLength: 2)
+                        Text("\(finder.count(in: folder.id))")
+                            .font(appearance.type(.caption)).monospacedDigit()
+                            .foregroundStyle(appearance.secondaryText(on: appearance.sidebarBG))
                     }
                     .padding(.horizontal, 8).frame(height: 26)
                     .background(RoundedRectangle(cornerRadius: appearance.cornerRadius)
-                        .fill(selected ? appearance.selection : .clear))
+                        .fill(targeted ? appearance.accent.opacity(0.22)
+                              : selected ? appearance.selection : .clear))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                // The folder is a place: drop an item on it to file it there.
+                .dropDestination(for: FinderItemDrag.self) { drags, _ in
+                    guard !drags.isEmpty else { return false }
+                    for drag in drags { finder.file(drag.id, into: folder.id) }
+                    NotificationCenter.default.post(
+                        name: .finderToast,
+                        object: "Filed in “\(folder.name)”")
+                    return true
+                } isTargeted: { targeted = $0 }
                 .contextMenu {
                     Button("Rename") { draft = folder.name; renaming = true }
                     Button("Delete Folder", role: .destructive) { finder.deleteFolder(folder.id) }
@@ -661,9 +722,7 @@ struct CollectSheet: View {
             .padding(12)
         }
         .frame(width: 560)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(appearance.hairline))
-        .shadow(color: .black.opacity(0.22), radius: 24, y: 8)
+        .runeSurface(appearance, .large)
         .onAppear { picked = Set(candidates.prefix(20).map(\.id)) }
     }
 
