@@ -202,7 +202,7 @@ private struct AppearancePane: View {
             } header: {
                 Text("Toolbar")
             } footer: {
-                Text("Minimal chrome is a thin strip above the page: back/forward and the address, nothing else — the checked commands below apply to the classic toolbar. Compact address bar shows just the site until you click it.")
+                Text("Minimal chrome keeps navigation and the address in the strip and the sidebar toggle by the traffic lights. The checked commands below become the corner kit — the ••• circle at the page's bottom right that opens on hover. Classic chrome shows them as a toolbar instead.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Start Page") {

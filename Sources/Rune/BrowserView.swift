@@ -104,13 +104,16 @@ private struct Sidebar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Rune's own lights — the system's went with the titlebar.
-            if !appearance.appearance.hideTrafficLights {
-                TrafficLights()
-                    .padding(.leading, 12).padding(.top, 12).padding(.bottom, 8)
-            } else {
-                Color.clear.frame(height: 10)
+            // The window's top-left verbs: Rune's own lights, and the sidebar
+            // toggle beside them — always present, because it's also the way
+            // back once the sidebar is gone.
+            HStack(spacing: 8) {
+                if !appearance.appearance.hideTrafficLights { TrafficLights() }
+                CommandButton(model: model, command: .toggleSidebar, dispatch: dispatch,
+                              showDownloads: .constant(false))
             }
+            .padding(.leading, appearance.appearance.hideTrafficLights ? 6 : 12)
+            .padding(.top, 8).padding(.bottom, 4)
 
             if model.isPrivate { privateBanner } else { SpaceBar(model: model, dispatch: dispatch) }
 
@@ -968,6 +971,12 @@ private struct ContentArea: View {
                         .runeSurface(appearance, .pill)
                         .padding(.top, 10)
                         .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if floatingChrome {
+                    CornerToolbar(model: model, dispatch: dispatch, showDownloads: $showDownloads)
+                        .padding(.trailing, 12).padding(.bottom, 12)
                 }
             }
             // Beside the content, never over it: a panel is a column, and the
@@ -1829,6 +1838,46 @@ private struct CommandButton: View {
 /// else asks for room. The hierarchy is fieldframes': one legible statement
 /// (the address), micro-scale ghost controls beside it, whitespace doing the
 /// rest. Which side the navigation sits on is yours to choose.
+/// The rest of the toolbar, out of the way: your checked commands live in a
+/// dot-circle at the page's bottom corner that blooms into buttons on hover.
+/// Navigation and the sidebar toggle have fixed homes; everything else is
+/// here — still data-driven, still remappable, just not underfoot.
+private struct CornerToolbar: View {
+    @ObservedObject var model: BrowserModel
+    let dispatch: (Command) -> Void
+    @Binding var showDownloads: Bool
+    @EnvironmentObject var appearance: AppearanceStore
+    @State private var open = false
+
+    /// The checked list, minus the commands that have permanent homes.
+    private var commands: [Command] {
+        let fixed: Set<Command> = [.goBack, .goForward, .reload, .toggleSidebar]
+        return appearance.appearance.toolbarButtons
+            .compactMap(Command.init(rawValue:))
+            .filter { !fixed.contains($0) }
+    }
+
+    var body: some View {
+        if !commands.isEmpty {
+            HStack(spacing: 2) {
+                if open {
+                    ForEach(commands) { CommandButton(model: model, command: $0, dispatch: dispatch,
+                                                      showDownloads: $showDownloads) }
+                } else {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(appearance.secondaryText(on: appearance.chrome))
+                        .frame(width: 26, height: 24)
+                }
+            }
+            .padding(.horizontal, open ? 6 : 2).padding(.vertical, 2)
+            .runeSurface(appearance, .pill)
+            .onHover { inside in withAnimation(Motion.arrive) { open = inside } }
+            .animation(Motion.arrive, value: open)
+        }
+    }
+}
+
 /// The strip, wearing the page: it tints itself with the site's theme color,
 /// the way Arc's bar does. Navigation cluster on one side, shield and split
 /// on the other (swappable), the host centered between them. On the start
@@ -1871,22 +1920,17 @@ private struct MinimalChrome: View {
         }
     }
 
-    /// Arc's right-hand pair, in Rune's terms: the shield and the split.
-    private var utilities: some View {
-        HStack(spacing: 2) {
-            CommandButton(model: model, command: .toggleBlocking, dispatch: dispatch,
-                          showDownloads: .constant(false), surface: surface)
-            CommandButton(model: model, command: .toggleSplit, dispatch: dispatch,
-                          showDownloads: .constant(false), surface: surface)
-        }
-    }
-
     var body: some View {
         HStack(spacing: 10) {
             if stripCarriesLights { TrafficLights() }
-            if navOnLeft { nav } else { utilities }
+            // The way back: with the sidebar away, its toggle moves up here.
+            if !model.sidebarVisible {
+                CommandButton(model: model, command: .toggleSidebar, dispatch: dispatch,
+                              showDownloads: .constant(false), surface: surface)
+            }
+            if navOnLeft { nav }
             Spacer(minLength: 0)
-            if navOnLeft { utilities } else { nav }
+            if !navOnLeft { nav }
         }
         // Centered on the window, not on what's left between the clusters —
         // and therefore in register with the suggestion panel below.
