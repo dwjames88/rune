@@ -25,10 +25,19 @@ struct Appearance: Codable, Equatable {
 
     // Toolbar
     /// Command rawValues shown as toolbar buttons, in order, before the
-    /// address bar. Any command works — the button dispatches it.
+    /// address bar. Any command works — the button dispatches it. This is the
+    /// master "enabled" list; `stripButtons` says which of them live in the
+    /// minimal strip rather than the corner kit.
     var toolbarButtons: [String] = ["toggleSidebar", "goBack", "goForward", "reload", "showDownloads"]
+    /// The subset of `toolbarButtons` worn by the minimal strip itself, in
+    /// order. Everything else enabled (bar the sidebar toggle, which has a
+    /// fixed home) waits in the corner kit. Wiggle mode drags between the two.
+    var stripButtons: [String] = ["goBack", "goForward", "reload"]
     /// Show just the site's host in the address bar until you click it.
     var compactAddressBar = true
+    /// Where the address text sits in the strip's field: "left", "center",
+    /// or "right".
+    var addressAlignment = "center"
     /// "floating" — the minimal strip: back/forward and a quiet address pill
     /// on a thin band above the page, nothing else. "attached" — the classic
     /// toolbar with the full button set.
@@ -64,7 +73,7 @@ struct Appearance: Codable, Equatable {
         case accent, sidebarColor, chromeColor, backgroundColor
         case fontName, fontSize, textColor
         case sidebarWidth, cornerRadius, sidebarOnRight
-        case toolbarButtons, compactAddressBar, chromeStyle, navPlacement
+        case toolbarButtons, stripButtons, compactAddressBar, addressAlignment, chromeStyle, navPlacement
         case startPageGreeting, startPageShowFavorites, startPageShowRecents, startPageBackground
         case hideTrafficLights, windowOpacity, blur, grain
         case appIconBackground, appIconGlyph
@@ -86,7 +95,9 @@ struct Appearance: Codable, Equatable {
         cornerRadius = try c.decodeIfPresent(Double.self, forKey: .cornerRadius) ?? d.cornerRadius
         sidebarOnRight = try c.decodeIfPresent(Bool.self, forKey: .sidebarOnRight) ?? d.sidebarOnRight
         toolbarButtons = try c.decodeIfPresent([String].self, forKey: .toolbarButtons) ?? d.toolbarButtons
+        stripButtons = try c.decodeIfPresent([String].self, forKey: .stripButtons) ?? d.stripButtons
         compactAddressBar = try c.decodeIfPresent(Bool.self, forKey: .compactAddressBar) ?? d.compactAddressBar
+        addressAlignment = try c.decodeIfPresent(String.self, forKey: .addressAlignment) ?? d.addressAlignment
         chromeStyle = try c.decodeIfPresent(String.self, forKey: .chromeStyle) ?? d.chromeStyle
         navPlacement = try c.decodeIfPresent(String.self, forKey: .navPlacement) ?? d.navPlacement
         startPageGreeting = try c.decodeIfPresent(String.self, forKey: .startPageGreeting) ?? d.startPageGreeting
@@ -142,6 +153,33 @@ final class AppearanceStore: ObservableObject {
         Storage.saveJSON(presets, to: "presets.json")
     }
     func resetToDefault() { appearance = .default }
+
+    // MARK: Control placement (wiggle mode)
+
+    /// The corner kit's list: everything enabled that isn't worn by the strip.
+    /// The sidebar toggle keeps its fixed home by the lights and is never here.
+    var cornerCommands: [Command] {
+        appearance.toolbarButtons
+            .filter { !appearance.stripButtons.contains($0) && $0 != Command.toggleSidebar.rawValue }
+            .compactMap(Command.init(rawValue:))
+    }
+    var stripCommands: [Command] {
+        appearance.stripButtons.compactMap(Command.init(rawValue:))
+    }
+
+    func moveToStrip(_ raw: String) {
+        appearance.stripButtons.removeAll { $0 == raw }
+        appearance.stripButtons.append(raw)
+        if !appearance.toolbarButtons.contains(raw) { appearance.toolbarButtons.append(raw) }
+    }
+    func moveToCorner(_ raw: String) {
+        appearance.stripButtons.removeAll { $0 == raw }
+        if !appearance.toolbarButtons.contains(raw) { appearance.toolbarButtons.append(raw) }
+    }
+    func disableControl(_ raw: String) {
+        appearance.stripButtons.removeAll { $0 == raw }
+        appearance.toolbarButtons.removeAll { $0 == raw }
+    }
 
     /// Write the current look to a `.runetheme` file to share.
     func export(to url: URL, name: String) {

@@ -53,8 +53,12 @@ private final class ClickReportingView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? {
         let hit = super.hitTest(point)
         // hitTest runs for mouse-moved too, and more than once per click —
-        // which is fine, since the only thing this does is focus a pane.
-        if hit != nil, NSApp.currentEvent?.type == .leftMouseDown { onClick?() }
+        // which is fine, since focusing a pane and blurring the address bars
+        // are both idempotent.
+        if hit != nil, NSApp.currentEvent?.type == .leftMouseDown {
+            onClick?()
+            NotificationCenter.default.post(name: .pageClicked, object: nil)
+        }
         return hit
     }
 }

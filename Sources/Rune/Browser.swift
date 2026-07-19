@@ -115,6 +115,10 @@ final class Tab: ObservableObject, Identifiable {
     @Published var isPlayingAudio = false
     @Published var muted = false
 
+    /// The page is being read downward — chrome that can duck, ducks.
+    /// Flips back on upward scroll, near the top, and on every navigation.
+    @Published var scrolledDown = false
+
     @Published var customName: String?
 
     /// The page's declared theme color (meta theme-color, else what WebKit
@@ -931,6 +935,11 @@ final class BrowserModel: ObservableObject {
 
     @discardableResult
     func newTab(url: URL? = nil, select: Bool = true) -> Tab {
+        // ⌘T in a split used to land the new tab in whichever pane was
+        // focused, replacing half of what you were looking at. A new tab is a
+        // request for a whole new page — the split stands down and both of
+        // its tabs stay put in the sidebar.
+        if select, isSplit { closeSplit() }
         // ⌘T with a start page already open focuses it instead of stacking blanks.
         if url == nil, settings.newTabBehavior == .startPage,
            let empty = sessionTabs.first(where: { $0.urlString.isEmpty && !$0.isLoading }) {
@@ -1242,6 +1251,15 @@ final class BrowserModel: ObservableObject {
     func goBack() { activeTab?.webView.goBack() }
     func goForward() { activeTab?.webView.goForward() }
     func reload() { activeTab?.webView.reload() }
+
+    /// Go get a failed download again. Any live web view can carry it — the
+    /// download belongs to the session, not to the page that started it.
+    func retryDownload(_ item: DownloadItem) {
+        guard let webView = activeTab?.webView ?? sessionTabs.first?.webView
+            ?? openTabs.values.first?.webView else { return }
+        downloads.remove(item)
+        coordinator.startDownload(item.source, from: webView)
+    }
     func recordVisit(_ url: URL, title: String) {
         guard !isPrivate else { return }
         history.record(url: url, title: title)

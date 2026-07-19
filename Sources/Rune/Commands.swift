@@ -40,6 +40,7 @@ enum Command: String, CaseIterable, Identifiable {
     case saveMediaUnderCursor
     case collectFromPage
     case capturePage
+    case editControls
     case openSettings
 
     var id: String { rawValue }
@@ -81,6 +82,7 @@ enum Command: String, CaseIterable, Identifiable {
         case .saveMediaUnderCursor: "Save Image Under Cursor"
         case .collectFromPage: "Collect Images from Page…"
         case .capturePage: "Capture Page to Finder"
+        case .editControls: "Customize Controls…"
         case .openSettings: "Settings…"
         }
     }
@@ -123,6 +125,7 @@ enum Command: String, CaseIterable, Identifiable {
         case .saveMediaUnderCursor: "photo.badge.arrow.down"
         case .collectFromPage: "square.grid.3x3.square"
         case .capturePage: "camera.viewfinder"
+        case .editControls: "slider.horizontal.3"
         case .openSettings: "gearshape"
         }
     }
@@ -132,7 +135,7 @@ enum Command: String, CaseIterable, Identifiable {
         switch self {
         case .newTab, .closeTab, .undoCloseTab, .newPrivateWindow, .copyURL, .printPage, .pinTab: .file
         case .reload, .findInPage, .zoomIn, .zoomOut, .zoomReset, .muteTab, .showDownloads, .toggleBlocking, .toggleSplit, .togglePanel, .toggleReader,
-             .toggleSidebar, .togglePiP, .commandPalette, .askPage: .view
+             .toggleSidebar, .togglePiP, .commandPalette, .askPage, .editControls: .view
         case .goBack, .goForward: .history
         case .focusAddress, .nextTab, .previousTab, .newSpace, .nextSpace, .previousSpace, .saveSession: .navigate
         case .openFinder, .saveMediaUnderCursor, .collectFromPage, .capturePage: .finder
@@ -178,6 +181,7 @@ enum Command: String, CaseIterable, Identifiable {
         case .saveMediaUnderCursor: ("s", .option)
         case .collectFromPage: ("s", [.command, .shift])
         case .capturePage: ("", [])
+        case .editControls: ("", [])
         case .openSettings: (",", .command)
         }
     }

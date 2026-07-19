@@ -31,6 +31,15 @@ osascript -e 'quit app id "com.dwjames.Rune"' && sleep 2 && open .build/Rune.app
   clicks near the top fail the allowlist check. Move windows down first, e.g.
   `osascript -e 'tell application "System Events" to set position of window "Rune Settings" of process "Rune" to {620, 300}'`
   (window positioning via System Events works; keystrokes don't).
+  Its window is **top-center and taller than it looks** — a click at screen-center
+  x near y≈210 (screenshot coords) still hit it while the same y at x≈400 was
+  fine. Clicking the same control off-center often avoids the move entirely.
+- **SwiftUI drags CAN be synthesized** — the old "can't" was two fixable causes:
+  the payload's UTType must be in `UTExportedTypeDeclarations` (dev-run.sh +
+  package.sh), and the sequence must be `left_mouse_down` → several incremental
+  `mouse_move`s → pause → `left_mouse_up` (not `left_click_drag`). Exception:
+  drags **starting in the titlebar-region strip** never begin — the window
+  frame eats the mouse-down (and moves the window unless `isMovable` is off).
 
 ## Picture in Picture specifics
 

@@ -25,7 +25,8 @@ final class FinderWindowController {
             w.titleVisibility = .hidden
             w.minSize = NSSize(width: 720, height: 440)
             w.center(); w.setFrameAutosaveName("RuneFinder"); w.isReleasedWhenClosed = false
-            let hosting = NSHostingController(rootView: FinderView(model: model, finder: model.finder)
+            let hosting = NSHostingController(rootView: FinderView(model: model, finder: model.finder,
+                                                                   downloads: model.downloads)
                 .overlay(alignment: .topLeading) {
                     TrafficLights().padding(.leading, 12).padding(.top, 10)
                 }
@@ -44,6 +45,16 @@ final class FinderWindowController {
     func toggle() {
         if let w = window, w.isVisible, w.isKeyWindow { w.close() } else { show() }
     }
+
+    /// ⌥⌘L and the downloads button: the window, already turned to Downloads.
+    func showDownloads() {
+        show()
+        // Next tick, not now: on the window's first showing the view hasn't
+        // subscribed yet, and a notification posted into that gap is lost.
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .finderShowDownloads, object: nil)
+        }
+    }
     var isKey: Bool { window?.isKeyWindow ?? false }
     func close() { window?.close() }
 }
@@ -51,6 +62,7 @@ final class FinderWindowController {
 struct FinderView: View {
     @ObservedObject var model: BrowserModel
     @ObservedObject var finder: FinderStore
+    @ObservedObject var downloads: DownloadStore
     @EnvironmentObject var appearance: AppearanceStore
 
     @State private var query = ""
@@ -61,7 +73,7 @@ struct FinderView: View {
     @State private var importTargeted = false
 
     enum Filter: Equatable {
-        case all, images, videos, starred
+        case all, images, videos, starred, downloads
         case folder(UUID)
         case tag(String)
     }
@@ -73,6 +85,7 @@ struct FinderView: View {
         case .images: items = items.filter { $0.kind == .image }
         case .videos: items = items.filter { $0.kind == .video }
         case .starred: items = items.filter { $0.star > 0 }
+        case .downloads: items = []   // its own pane, not a grid slice
         case .folder(let id): items = items.filter { $0.folderIDs.contains(id) }
         case .tag(let tag): items = items.filter { $0.tags.contains(tag) }
         }
@@ -111,6 +124,13 @@ struct FinderView: View {
             }
         }
         .animation(.easeOut(duration: 0.18), value: toast)
+        // ⌥⌘L / the downloads button: arrive already turned to Downloads.
+        // Looking at the list is what counts as having seen it.
+        .onReceive(NotificationCenter.default.publisher(for: .finderShowDownloads)) { _ in
+            filter = .downloads
+            downloads.hasUnseen = false
+        }
+        .onChange(of: filter) { if filter == .downloads { downloads.hasUnseen = false } }
         .onReceive(NotificationCenter.default.publisher(for: .finderToast)) { note in
             toast = note.object as? String
             toastDismiss?.cancel()
@@ -140,6 +160,7 @@ struct FinderView: View {
                     ("photo", "Images", .images, finder.items.filter { $0.kind == .image }.count),
                     ("film", "Videos", .videos, finder.items.filter { $0.kind == .video }.count),
                     ("star", "Starred", .starred, finder.items.filter { $0.star > 0 }.count),
+                    ("arrow.down.circle", "Downloads", .downloads, downloads.items.count),
                 ])
                 VStack(alignment: .leading, spacing: 2) {
                     HStack {
@@ -228,7 +249,8 @@ struct FinderView: View {
                 .padding(.horizontal, 10).padding(.vertical, 6)
                 .background(appearance.windowBG, in: RoundedRectangle(cornerRadius: appearance.cornerRadius))
                 .overlay(RoundedRectangle(cornerRadius: appearance.cornerRadius).strokeBorder(appearance.hairline))
-                Text("\(filtered.count) item\(filtered.count == 1 ? "" : "s")")
+                let count = filter == .downloads ? downloads.items.count : filtered.count
+                Text("\(count) item\(count == 1 ? "" : "s")")
                     .font(appearance.font(11)).foregroundStyle(appearance.secondaryText(on: appearance.chrome))
             }
             .padding(10)
@@ -236,7 +258,10 @@ struct FinderView: View {
             Divider().overlay(appearance.hairline)
 
             Group {
-                if filtered.isEmpty {
+                if filter == .downloads {
+                    DownloadsList(downloads: downloads, query: query,
+                                  retry: { model.retryDownload($0) })
+                } else if filtered.isEmpty {
                     emptyState
                 } else {
                     ScrollView {

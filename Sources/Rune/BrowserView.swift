@@ -109,8 +109,7 @@ private struct Sidebar: View {
             // back once the sidebar is gone.
             HStack(spacing: 8) {
                 if !appearance.appearance.hideTrafficLights { TrafficLights() }
-                CommandButton(model: model, command: .toggleSidebar, dispatch: dispatch,
-                              showDownloads: .constant(false))
+                CommandButton(model: model, command: .toggleSidebar, dispatch: dispatch)
             }
             .padding(.leading, appearance.appearance.hideTrafficLights ? 6 : 12)
             .padding(.top, 8).padding(.bottom, 4)
@@ -344,9 +343,7 @@ private struct FolderView: View {
     let folder: Folder
     @EnvironmentObject var appearance: AppearanceStore
     @State private var targeted = false
-    @State private var pickingIcon = false
-    @State private var pickingColor = false
-    @State private var renaming = false
+    @State private var customizing = false
 
     /// A folder is the one thing in the sidebar that carries a colour; without
     /// one it simply wears the appearance accent.
@@ -357,7 +354,7 @@ private struct FolderView: View {
             HStack(spacing: 6) {
                 Image(systemName: folder.collapsed ? "chevron.right" : "chevron.down")
                     .font(.system(size: 9)).foregroundStyle(appearance.sidebarSecondary).frame(width: 10)
-                Image(systemName: folder.icon).font(.system(size: 11)).foregroundStyle(tint)
+                FolderGlyph(icon: folder.icon, tint: tint, size: 12)
                 Text(folder.name).font(appearance.font(12, weight: .medium))
                 Spacer()
             }
@@ -371,26 +368,12 @@ private struct FolderView: View {
                 model.handleDrop(drag, to: .pinned(folderID: folder.id, index: nil)); return true
             } isTargeted: { targeted = $0 }
             .contextMenu {
-                Button("Rename…") { renaming = true }
-                Button("Change Icon…") { pickingIcon = true }
-                Button("Change Color…") { pickingColor = true }
+                Button("Customize Folder…") { customizing = true }
                 Divider()
                 Button("Delete Folder", role: .destructive) { model.deleteFolder(folder.id) }
             }
-            .popover(isPresented: $pickingIcon) {
-                SymbolPicker(symbol: .constant(folder.icon), tint: tint) { icon in
-                    model.setFolderIcon(folder.id, icon); pickingIcon = false
-                }
-            }
-            .popover(isPresented: $pickingColor) {
-                FolderColorPopover(current: tint, hasColor: folder.colorHex != nil) { hex in
-                    model.setFolderColor(folder.id, hex)
-                }
-            }
-            .popover(isPresented: $renaming) {
-                RenamePopover(title: "Rename Folder", name: folder.name) {
-                    model.renameFolder(folder.id, to: $0); renaming = false
-                }
+            .popover(isPresented: $customizing) {
+                CustomizeFolderPopover(model: model, folderID: folder.id)
             }
 
             if !folder.collapsed {
@@ -750,37 +733,85 @@ extension View {
     }
 }
 
-// MARK: - Folder colour
+// MARK: - Folder customization
 
-/// Colour is a folder's only decoration, so it gets one small picker: a live
-/// swatch plus a way back to the appearance accent.
-private struct FolderColorPopover: View {
+/// The sidebar's folder mark, Finder-style: a folder shape wearing the
+/// folder's colour, with the chosen symbol set into it. A folder that has
+/// picked a folder symbol is just a folder — no badge inside a badge.
+struct FolderGlyph: View {
+    let icon: String
+    let tint: Color
+    var size: CGFloat = 12
+    @EnvironmentObject var appearance: AppearanceStore
+
+    var body: some View {
+        ZStack {
+            Image(systemName: "folder.fill").font(.system(size: size)).foregroundStyle(tint)
+            if !icon.hasPrefix("folder") {
+                Image(systemName: icon)
+                    .font(.system(size: size * 0.45, weight: .bold))
+                    .foregroundStyle(appearance.text(on: tint).opacity(0.85))
+                    // The folder's body sits below its tab; the badge sits in
+                    // the body.
+                    .offset(y: size * 0.1)
+            }
+        }
+        .frame(width: size + 2)
+    }
+}
+
+/// Rename, colour, and icon in one sheet of glass — a folder's whole
+/// wardrobe behind a single "Customize Folder" instead of three menu trips.
+/// Everything applies live; the popover is the preview.
+private struct CustomizeFolderPopover: View {
+    @ObservedObject var model: BrowserModel
+    let folderID: UUID
+    @State private var name: String
     @State private var color: Color
     @State private var hasColor: Bool
-    let apply: (String?) -> Void
+    @EnvironmentObject var appearance: AppearanceStore
 
-    init(current: Color, hasColor: Bool, apply: @escaping (String?) -> Void) {
-        _color = State(initialValue: current)
-        _hasColor = State(initialValue: hasColor)
-        self.apply = apply
+    @MainActor
+    init(model: BrowserModel, folderID: UUID) {
+        self.model = model
+        self.folderID = folderID
+        let folder = model.folders.first { $0.id == folderID }
+        _name = State(initialValue: folder?.name ?? "")
+        _hasColor = State(initialValue: folder?.colorHex != nil)
+        _color = State(initialValue: folder?.colorHex.flatMap(Color.init(hex:)) ?? .accentColor)
     }
+
+    private var folder: Folder? { model.folders.first { $0.id == folderID } }
+    private var tint: Color { folder?.colorHex.flatMap(Color.init(hex:)) ?? appearance.accent }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Folder Color").font(.headline)
+            HStack(spacing: 8) {
+                FolderGlyph(icon: folder?.icon ?? "folder.fill", tint: tint, size: 16)
+                Text("Customize Folder").font(.headline)
+            }
+            TextField("Name", text: $name)
+                .textFieldStyle(.roundedBorder)
+                .onChange(of: name) { model.renameFolder(folderID, to: name) }
             HStack {
                 ColorPicker("Color", selection: $color, supportsOpacity: false)
                     .disabled(!hasColor)
-                    .onChange(of: color) { if hasColor { apply(color.hex) } }
+                    .onChange(of: color) { if hasColor { model.setFolderColor(folderID, color.hex) } }
+                Spacer()
+                Toggle("Accent", isOn: Binding(
+                    get: { !hasColor },
+                    set: { useAccent in
+                        hasColor = !useAccent
+                        model.setFolderColor(folderID, useAccent ? nil : color.hex)
+                    }))
+                .toggleStyle(.checkbox)
             }
-            Toggle("Use the accent color", isOn: Binding(
-                get: { !hasColor },
-                set: { useAccent in
-                    hasColor = !useAccent
-                    apply(useAccent ? nil : color.hex)
-                }))
+            Divider()
+            SymbolPicker(symbol: .constant(folder?.icon ?? "folder.fill"), tint: tint) { icon in
+                model.setFolderIcon(folderID, icon)
+            }
         }
-        .padding(12).frame(width: 230)
+        .padding(12)
     }
 }
 
@@ -880,7 +911,11 @@ private struct ContentArea: View {
     @State private var toast: String?
     @State private var toastDismiss: Task<Void, Never>?
     @State private var showFind = false
-    @State private var showDownloads = false
+    /// Wiggle mode: the strip and corner kit take edits instead of clicks.
+    @State private var controlEdit = false
+    /// The active page's color, mirrored here so the suggestion dropdown can
+    /// wear the same surface the strip does.
+    @State private var tint: NSColor?
 
     private func updateSuggestions() {
         suggestions = addressFocused ? addressSuggestions(for: address, model: model) : []
@@ -899,12 +934,13 @@ private struct ContentArea: View {
             if floatingChrome && !model.isSplit {
                 MinimalChrome(model: model, dispatch: dispatch, address: $address,
                               addressFocused: $addressFocused, highlighted: $highlighted,
-                              suggestionCount: suggestions.count, activate: activate)
+                              suggestionCount: suggestions.count, editing: $controlEdit,
+                              activate: activate)
                 Divider()
             } else if !floatingChrome {
                 Toolbar(model: model, dispatch: dispatch, address: $address, addressFocused: $addressFocused,
                         highlighted: $highlighted, suggestionCount: suggestions.count,
-                        showDownloads: $showDownloads, activate: activate)
+                        activate: activate)
                 Divider()
             }
             HStack(spacing: 0) {
@@ -943,25 +979,18 @@ private struct ContentArea: View {
                         .frame(maxWidth: .infinity, alignment: .trailing)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
-                if showDownloads {
-                    DownloadsPanel(downloads: model.downloads, showing: $showDownloads)
-                        .dismissOnEscape { showDownloads = false }
-                        .padding(.top, 8).padding(.trailing, 12)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
                 if let candidates = model.collectCandidates {
                     CollectSheet(model: model, candidates: candidates)
                         .padding(.top, 24)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
+                // The dropdown is the bar grown taller: full width, wearing
+                // the strip's surface, seam to seam with the chrome above.
                 if !suggestions.isEmpty, !model.isSplit {
-                    SuggestionList(model: model, suggestions: suggestions, highlighted: highlighted) { index in
+                    SuggestionList(model: model, suggestions: suggestions, highlighted: highlighted,
+                                   surface: floatingChrome ? tint.map(Color.init(nsColor:)) : nil) { index in
                         highlighted = index; activate()
                     }
-                    .frame(maxWidth: floatingChrome ? 640 : .infinity)
-                    .padding(.horizontal, floatingChrome ? 0 : 44)
-                    .padding(.top, 4)
                 }
                 if let toast {
                     Text(toast)
@@ -975,9 +1004,14 @@ private struct ContentArea: View {
             }
             .overlay(alignment: .bottomTrailing) {
                 if floatingChrome {
-                    CornerToolbar(model: model, dispatch: dispatch, showDownloads: $showDownloads)
+                    CornerToolbar(model: model, downloads: model.downloads,
+                                  dispatch: dispatch, editing: $controlEdit)
                         .padding(.trailing, 12).padding(.bottom, 12)
                 }
+            }
+            // The quiet corner opposite: download progress while bytes land.
+            .overlay(alignment: .bottomLeading) {
+                DownloadCorner(downloads: model.downloads)
             }
             // Beside the content, never over it: a panel is a column, and the
             // page keeps whatever room is left.
@@ -990,23 +1024,19 @@ private struct ContentArea: View {
         }
         .animation(.easeOut(duration: 0.18), value: toast)
         .animation(.easeOut(duration: 0.15), value: showFind)
-        .animation(.easeOut(duration: 0.15), value: showDownloads)
-        // Both panels hang off the same corner, so only one is ever up — and
-        // opening the list is what counts as having seen it, however you opened
-        // it (the toolbar button or ⌥⌘L).
-        .onChange(of: showDownloads) {
-            guard showDownloads else { return }
-            showFind = false
-            model.downloads.hasUnseen = false
-        }
-        .onChange(of: showFind) { if showFind { showDownloads = false } }
         .onReceive(NotificationCenter.default.publisher(for: .showFindBar)) {
             if $0.aimed(at: model) { showFind = true }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .showDownloads)) {
-            if $0.aimed(at: model) { showDownloads.toggle() }
+        // Wiggle mode, from the command or the palette.
+        .onReceive(NotificationCenter.default.publisher(for: .toggleControlEdit)) {
+            if $0.aimed(at: model) { withAnimation(Motion.arrive) { controlEdit.toggle() } }
         }
-        .onChange(of: model.selection) { sync() }
+        // While the shelves take drags, the window doesn't: the strip sits in
+        // the titlebar region, whose frame-level dragging outranks a SwiftUI
+        // drag source and was carrying the whole window along with the button.
+        .onChange(of: controlEdit) { NSApp.keyWindow?.isMovable = !controlEdit }
+        .onChange(of: model.selection) { sync(); tint = model.activeTab?.themeColor }
+        .onReceive(activeThemePublisher) { tint = $0 }
         // Live URL updates from the active tab: ContentArea doesn't observe the
         // Tab object, so navigations that never touch the toolbar (start-page
         // search, link clicks) must push the new URL in via its publisher.
@@ -1037,6 +1067,10 @@ private struct ContentArea: View {
 
     private var activeURLPublisher: AnyPublisher<String, Never> {
         model.activeTab?.$urlString.eraseToAnyPublisher() ?? Just("").eraseToAnyPublisher()
+    }
+
+    private var activeThemePublisher: AnyPublisher<NSColor?, Never> {
+        model.activeTab?.$themeColor.eraseToAnyPublisher() ?? Just(nil).eraseToAnyPublisher()
     }
 
     private func activate() {
@@ -1080,6 +1114,22 @@ struct AddressField: View {
         appearance.appearance.compactAddressBar && !focused.wrappedValue && !address.isEmpty
     }
 
+    /// Where the address sits in its field — a setting, like everything.
+    private var textAlignment: TextAlignment {
+        switch appearance.appearance.addressAlignment {
+        case "left": .leading
+        case "right": .trailing
+        default: .center
+        }
+    }
+    private var frameAlignment: Alignment {
+        switch appearance.appearance.addressAlignment {
+        case "left": .leading
+        case "right": .trailing
+        default: .center
+        }
+    }
+
     /// The padlock: what the connection is, said quietly. Only meaningful when
     /// an address is loaded and the field is at rest.
     private var leadingSymbol: String {
@@ -1112,6 +1162,7 @@ struct AddressField: View {
             ZStack(alignment: .leading) {
                 TextField("Search or enter address", text: $address)
                     .textFieldStyle(.plain)
+                    .multilineTextAlignment(textAlignment)
                     .foregroundStyle(appearance.text(on: base))
                     .focused(focused)
                     .onSubmit(activate)
@@ -1137,7 +1188,7 @@ struct AddressField: View {
                             // Primary ink on the tint — the host is the one
                             // legible statement on the strip, Arc-style.
                             .foregroundStyle(appearance.text(on: base))
-                            .frame(maxWidth: .infinity, alignment: style == .pill ? .center : .leading)
+                            .frame(maxWidth: .infinity, alignment: frameAlignment)
                             .background(style == .pill ? Color.clear : appearance.windowBG)   // hide the field underneath
                             .contentShape(Rectangle())
                     }
@@ -1146,11 +1197,15 @@ struct AddressField: View {
             }
         }
         .padding(.horizontal, style == .pill ? 14 : 10).padding(.vertical, style == .pill ? 8 : 6)
+        // No stroke, focused or not — focus shows as the caret and the
+        // suggestions; a ring around the field was one box too many.
         .background(style == .pill ? Color.clear : appearance.windowBG,
                     in: RoundedRectangle(cornerRadius: appearance.radius(style == .pill ? .pill : .medium)))
-        .overlay(RoundedRectangle(cornerRadius: appearance.radius(style == .pill ? .pill : .medium))
-            .strokeBorder(focused.wrappedValue ? appearance.accent
-                          : (style == .pill ? .clear : appearance.hairline), lineWidth: 1))
+        // A click that lands on the page takes the keyboard with it — the
+        // field lets go instead of keeping a dead caret.
+        .onReceive(NotificationCenter.default.publisher(for: .pageClicked)) { _ in
+            focused.wrappedValue = false
+        }
     }
 }
 
@@ -1290,12 +1345,37 @@ enum Suggestion: Identifiable {
     }
 }
 
+/// The download progress card's perch, bottom-left over the page. Its own
+/// view so only this corner re-renders per progress tick, not the window.
+private struct DownloadCorner: View {
+    @ObservedObject var downloads: DownloadStore
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            if downloads.activeCount > 0 {
+                DownloadProgressCard(downloads: downloads)
+                    .padding(12)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(Motion.arrive, value: downloads.activeCount > 0)
+    }
+}
+
+/// The bar, grown taller: suggestions run the full width of whatever bar
+/// asked, on that bar's own surface, seam to seam — an expansion of the
+/// field rather than a card floating near it.
 private struct SuggestionList: View {
     @ObservedObject var model: BrowserModel
     let suggestions: [Suggestion]
     let highlighted: Int
+    /// The surface the bar above is wearing (the strip's page tint); nil
+    /// falls back to the chrome color.
+    var surface: Color? = nil
     let pick: (Int) -> Void
     @EnvironmentObject var appearance: AppearanceStore
+
+    private var base: Color { surface ?? appearance.chrome }
 
     var body: some View {
         VStack(spacing: 1) {
@@ -1303,24 +1383,33 @@ private struct SuggestionList: View {
                 let on = index == highlighted
                 HStack(spacing: 9) {
                     Image(systemName: icon(item)).frame(width: 16)
-                        .foregroundStyle(on ? .white : appearance.secondaryText(on: appearance.chrome))
+                        .foregroundStyle(on ? .white : appearance.secondaryText(on: base))
                     Text(title(item)).lineLimit(1)
-                        .foregroundStyle(on ? .white : appearance.chromeText)
+                        .foregroundStyle(on ? .white : appearance.text(on: base))
                     Spacer()
                     if case .history(let e) = item {
                         Text(e.url).font(appearance.font(11)).lineLimit(1)
-                            .foregroundStyle(on ? .white.opacity(0.8) : appearance.secondaryText(on: appearance.chrome))
+                            .foregroundStyle(on ? .white.opacity(0.8) : appearance.secondaryText(on: base))
                             .frame(maxWidth: 260, alignment: .trailing)
                     }
                 }
                 .padding(.horizontal, 10).padding(.vertical, 7)
-                .background(RoundedRectangle(cornerRadius: 6).fill(on ? appearance.accent : .clear))
+                .background(RoundedRectangle(cornerRadius: appearance.radius(.small))
+                    .fill(on ? appearance.accent : .clear))
                 .contentShape(Rectangle())
                 .onTapGesture { pick(index) }
             }
         }
-        .padding(5)
-        .runeSurface(appearance, .large)
+        .padding(.horizontal, 8).padding(.top, 5).padding(.bottom, 7)
+        .frame(maxWidth: .infinity)
+        .background {
+            ZStack {
+                Rectangle().fill(.regularMaterial)
+                base.opacity(appearance.containerOpacity * 0.9).allowsHitTesting(false)
+            }
+        }
+        .overlay(alignment: .bottom) { Divider() }
+        .shadow(color: .black.opacity(0.12), radius: 10, y: 6)
     }
 
     private func icon(_ s: Suggestion) -> String {
@@ -1441,18 +1530,19 @@ private struct Pane: View {
             ZStack(alignment: .top) {
                 Group {
                     if let tab = model.tab(for: pane) {
-                        TabContent(tab: tab, model: model, onClick: { focus() })
+                        TabContent(tab: tab, model: model, downloads: model.downloads,
+                                   onClick: { focus() })
                     } else {
                         StartPage(model: model)
                     }
                 }
                 // Inside the pane's stack, so it lands over this page and not
-                // over the neighbour's.
+                // over the neighbour's — the pane bar's own dropdown.
                 if !suggestions.isEmpty {
-                    SuggestionList(model: model, suggestions: suggestions, highlighted: highlighted) { index in
+                    SuggestionList(model: model, suggestions: suggestions, highlighted: highlighted,
+                                   surface: model.tab(for: pane)?.themeColor.map(Color.init(nsColor:))) { index in
                         highlighted = index; activate()
                     }
-                    .padding(.horizontal, 12).padding(.top, 4)
                 }
             }
         }
@@ -1568,6 +1658,9 @@ private struct PaneBar: View {
 private struct TabContent: View {
     @ObservedObject var tab: Tab
     @ObservedObject var model: BrowserModel
+    /// Observed here so the link summary makes room the moment a download
+    /// card lands in its corner.
+    @ObservedObject var downloads: DownloadStore
     var onClick: (() -> Void)?
     var body: some View {
         if let failure = tab.securityFailure {
@@ -1596,6 +1689,9 @@ private struct TabContent: View {
                     if let hover = tab.hoveredLink {
                         LinkSummaryPopover(target: hover, ai: model.ai)
                             .padding(12)
+                            // The download card holds this corner while bytes
+                            // land; the summary steps up over it.
+                            .padding(.bottom, downloads.activeCount > 0 ? 58 : 0)
                             .allowsHitTesting(false)
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
@@ -1756,7 +1852,6 @@ private struct Toolbar: View {
     var addressFocused: FocusState<Bool>.Binding
     @Binding var highlighted: Int
     let suggestionCount: Int
-    @Binding var showDownloads: Bool
     let activate: () -> Void
     @EnvironmentObject var appearance: AppearanceStore
 
@@ -1768,8 +1863,7 @@ private struct Toolbar: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            ForEach(commands) { CommandButton(model: model, command: $0, dispatch: dispatch,
-                                              showDownloads: $showDownloads) }
+            ForEach(commands) { CommandButton(model: model, command: $0, dispatch: dispatch) }
 
             if !model.isSplit {
                 AddressField(address: $address, focused: addressFocused, highlighted: $highlighted,
@@ -1801,7 +1895,6 @@ private struct CommandButton: View {
     @ObservedObject var model: BrowserModel
     let command: Command
     let dispatch: (Command) -> Void
-    @Binding var showDownloads: Bool
     /// What the button sits on; its ink keeps contrast against it.
     var surface: Color? = nil
     @EnvironmentObject var appearance: AppearanceStore
@@ -1809,7 +1902,7 @@ private struct CommandButton: View {
     var body: some View {
         switch command {
         case .showDownloads:
-            DownloadsButton(downloads: model.downloads, showing: $showDownloads)
+            DownloadsButton(downloads: model.downloads) { dispatch(command) }
         case .goBack:
             button(command.icon) { dispatch(command) }
                 .disabled(!(model.activeTab?.canGoBack ?? false)).help(command.title)
@@ -1838,43 +1931,209 @@ private struct CommandButton: View {
 /// else asks for room. The hierarchy is fieldframes': one legible statement
 /// (the address), micro-scale ghost controls beside it, whitespace doing the
 /// rest. Which side the navigation sits on is yours to choose.
-/// The rest of the toolbar, out of the way: your checked commands live in a
-/// dot-circle at the page's bottom corner that blooms into buttons on hover.
-/// Navigation and the sidebar toggle have fixed homes; everything else is
-/// here — still data-driven, still remappable, just not underfoot.
+/// The rest of the toolbar, out of the way: your corner commands live behind
+/// a grab tab peeking from the page's bottom-right edge. Hover slides the kit
+/// out; reading down the page slides the tab away entirely (the bridge
+/// reports scroll direction). A finished download pins a dot to the tab and
+/// keeps it on stage until you've looked. In wiggle mode this is one of the
+/// two shelves buttons drag between — still data-driven, still remappable.
 private struct CornerToolbar: View {
     @ObservedObject var model: BrowserModel
+    @ObservedObject var downloads: DownloadStore
     let dispatch: (Command) -> Void
-    @Binding var showDownloads: Bool
+    @Binding var editing: Bool
     @EnvironmentObject var appearance: AppearanceStore
     @State private var open = false
+    @State private var pageScrolledDown = false
+    @State private var dropTargeted = false
 
-    /// The checked list, minus the commands that have permanent homes.
-    private var commands: [Command] {
-        let fixed: Set<Command> = [.goBack, .goForward, .reload, .toggleSidebar]
-        return appearance.appearance.toolbarButtons
-            .compactMap(Command.init(rawValue:))
-            .filter { !fixed.contains($0) }
+    private var commands: [Command] { appearance.cornerCommands }
+
+    private var expanded: Bool { open || editing }
+    /// Off stage entirely — unless you're hovering it, editing it, or a
+    /// finished download is waiting to be seen.
+    private var ducked: Bool { pageScrolledDown && !expanded && !downloads.hasUnseen }
+
+    private var scrollPublisher: AnyPublisher<Bool, Never> {
+        model.activeTab?.$scrolledDown.eraseToAnyPublisher() ?? Just(false).eraseToAnyPublisher()
+    }
+
+    /// The tab's outline. A full pill while the kit is open; the docked grab
+    /// handle when it's closed — left corners rounded (8), right edge square,
+    /// because that edge is pressed against the window it hangs from.
+    private var tabShape: UnevenRoundedRectangle {
+        let r = expanded ? appearance.radius(.pill) : 8
+        return UnevenRoundedRectangle(
+            topLeadingRadius: r, bottomLeadingRadius: r,
+            bottomTrailingRadius: expanded ? r : 0,
+            topTrailingRadius: expanded ? r : 0,
+            style: .continuous)
     }
 
     var body: some View {
-        if !commands.isEmpty {
+        if !commands.isEmpty || editing || downloads.hasUnseen {
             HStack(spacing: 2) {
-                if open {
-                    ForEach(commands) { CommandButton(model: model, command: $0, dispatch: dispatch,
-                                                      showDownloads: $showDownloads) }
-                } else {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(appearance.secondaryText(on: appearance.chrome))
-                        .frame(width: 26, height: 24)
+                if expanded {
+                    ForEach(commands) { command in
+                        EditableControl(model: model, command: command, dispatch: dispatch,
+                                        editing: editing,
+                                        swap: { appearance.moveToStrip(command.rawValue) },
+                                        remove: { appearance.disableControl(command.rawValue) })
+                    }
+                    if editing {
+                        addMenu
+                        Button { withAnimation(Motion.arrive) { editing = false } } label: {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 13, weight: .medium))
+                                .frame(width: 26, height: 24).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(appearance.accent)
+                        .help("Done")
+                    }
+                }
+                // The grab handle is always the rightmost thing — so there's
+                // always something to grab, and the buttons open out to its
+                // left. A slim grip the height of the icon glyphs; when the
+                // kit is open it sits in a button-width cell so it keeps the
+                // row's spacing instead of jamming against the last icon.
+                Capsule()
+                    .fill(appearance.chromeText.opacity(0.72))
+                    .frame(width: 6, height: 15)
+                    .frame(width: expanded ? 18 : 6, height: 24)
+                    .contentShape(Rectangle())
+                    .overlay(alignment: .topLeading) {
+                        if downloads.hasUnseen {
+                            Circle().fill(appearance.accent).frame(width: 6, height: 6)
+                                .offset(x: -4, y: -1)
+                        }
+                    }
+            }
+            // One padding for both states: the grip and the buttons wear the
+            // same frame, so the surface never changes height on hover.
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            // The toolbar's own surface, visibly: material with a quiet gray
+            // over it, so the tab reads against the page it floats on. One
+            // shape serves both states — pill open, docked tab closed. Every
+            // layer lives in the background (behind the buttons) so none of
+            // them can eat a click; a stray fill overlay here silently ate
+            // the whole kit's taps.
+            .background {
+                tabShape.fill(.regularMaterial)
+                tabShape.fill(Color.primary.opacity(0.05))
+                tabShape.strokeBorder(appearance.hairline)
+                tabShape.strokeBorder(dropTargeted ? appearance.accent : .clear, lineWidth: 1.5)
+            }
+            .shadow(color: .black.opacity(0.18), radius: 16, y: 7)
+            // Open, the kit keeps its inset; closed, the tab docks flush to
+            // the window edge; ducked, it slides all the way off.
+            .offset(x: ducked ? 72 : (expanded ? 0 : 12))
+            .onHover { inside in
+                guard !editing else { return }
+                withAnimation(Motion.arrive) { open = inside }
+            }
+            .animation(Motion.arrive, value: expanded)
+            .animation(Motion.arrive, value: ducked)
+            .dropDestination(for: ControlDrag.self) { items, _ in
+                guard editing, let drag = items.first else { return false }
+                withAnimation(Motion.update) { appearance.moveToCorner(drag.command) }
+                return true
+            } isTargeted: { dropTargeted = editing && $0 }
+            .onReceive(scrollPublisher) { pageScrolledDown = $0 }
+            .onChange(of: model.selection) { pageScrolledDown = model.activeTab?.scrolledDown ?? false }
+        }
+    }
+
+    /// Everything not yet on either shelf, one pick away from the corner.
+    private var addMenu: some View {
+        Menu {
+            ForEach(Command.allCases.filter { !appearance.appearance.toolbarButtons.contains($0.rawValue) }) { command in
+                Button {
+                    withAnimation(Motion.update) { appearance.moveToCorner(command.rawValue) }
+                } label: {
+                    Label(command.title, systemImage: command.icon)
                 }
             }
-            .padding(.horizontal, open ? 6 : 2).padding(.vertical, 2)
-            .runeSurface(appearance, .pill)
-            .onHover { inside in withAnimation(Motion.arrive) { open = inside } }
-            .animation(Motion.arrive, value: open)
+        } label: {
+            Image(systemName: "plus.circle")
+                .font(.system(size: 13, weight: .medium))
+                .frame(width: 26, height: 24).contentShape(Rectangle())
         }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden)
+        .frame(width: 26)
+        .foregroundStyle(appearance.secondaryText(on: appearance.chrome))
+        .help("Add a control")
+    }
+}
+
+/// One button on a shelf, wearing wiggle mode when it's on: the jiggle, a
+/// remove badge, and a drag payload. At rest it's just the button.
+///
+/// In edit mode this is deliberately NOT a disabled Button — a disabled
+/// control also declines to start drags. It's the bare glyph, drawn the same,
+/// with the drag and the badge attached to it directly.
+private struct EditableControl: View {
+    @ObservedObject var model: BrowserModel
+    let command: Command
+    let dispatch: (Command) -> Void
+    let editing: Bool
+    var surface: Color? = nil
+    /// Send this button to the other shelf. Clicking a wiggling button does
+    /// the same thing as dragging it across — the strip lives in the
+    /// titlebar region, where the window frame outranks drag gestures often
+    /// enough that the click needs to be a full way, not a shortcut.
+    let swap: () -> Void
+    let remove: () -> Void
+    @EnvironmentObject var appearance: AppearanceStore
+
+    var body: some View {
+        if editing {
+            // A Button on purpose, twice over: a disabled control declines to
+            // start drags, and a passive view in the titlebar region hands
+            // its mouse-down to window-dragging — an enabled Button is the
+            // one thing that both keeps the click and lets the drag run.
+            Button { withAnimation(Motion.update) { swap() } } label: {
+                Image(systemName: command.icon)
+                    .font(.system(size: 13, weight: .medium))
+                    .frame(width: 26, height: 24)
+                    .foregroundStyle(appearance.secondaryText(on: surface ?? appearance.chrome))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+                .modifier(Wiggle())
+                .draggable(ControlDrag(command: command.rawValue)) {
+                    // The drag preview: the same glyph on a small chip.
+                    Image(systemName: command.icon)
+                        .font(.system(size: 13, weight: .medium))
+                        .frame(width: 26, height: 24)
+                }
+                .overlay(alignment: .topLeading) {
+                    Button(action: remove) {
+                        Image(systemName: "minus.circle.fill")
+                            .font(.system(size: 10))
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.white, Color(red: 0.85, green: 0.3, blue: 0.25))
+                    }
+                    .buttonStyle(.plain)
+                    .offset(x: -2, y: -3)
+                    .help("Remove")
+                }
+        } else {
+            CommandButton(model: model, command: command, dispatch: dispatch, surface: surface)
+        }
+    }
+}
+
+/// The iOS home-screen tremble, small enough for chrome buttons: a couple of
+/// degrees each way, forever, until edit mode ends and the modifier leaves.
+private struct Wiggle: ViewModifier {
+    @State private var tilted = false
+
+    func body(content: Content) -> some View {
+        content
+            .rotationEffect(.degrees(tilted ? 2.4 : -2.4))
+            .animation(.easeInOut(duration: 0.14).repeatForever(autoreverses: true), value: tilted)
+            .onAppear { tilted = true }
     }
 }
 
@@ -1889,11 +2148,13 @@ private struct MinimalChrome: View {
     var addressFocused: FocusState<Bool>.Binding
     @Binding var highlighted: Int
     let suggestionCount: Int
+    @Binding var editing: Bool
     let activate: () -> Void
     @EnvironmentObject var appearance: AppearanceStore
 
     /// The active page's color, pushed as WebKit discovers it.
     @State private var tint: NSColor?
+    @State private var dropTargeted = false
 
     private var navOnLeft: Bool { appearance.appearance.navPlacement != "right" }
     private var surface: Color { tint.map(Color.init(nsColor:)) ?? appearance.chrome }
@@ -1909,15 +2170,32 @@ private struct MinimalChrome: View {
         model.activeTab?.$themeColor.eraseToAnyPublisher() ?? Just(nil).eraseToAnyPublisher()
     }
 
+    /// The strip's shelf of the control set — what wiggle mode drags in and
+    /// out. Which commands is a setting (`stripButtons`), like everything.
     private var nav: some View {
         HStack(spacing: 2) {
-            CommandButton(model: model, command: .goBack, dispatch: dispatch,
-                          showDownloads: .constant(false), surface: surface)
-            CommandButton(model: model, command: .goForward, dispatch: dispatch,
-                          showDownloads: .constant(false), surface: surface)
-            CommandButton(model: model, command: .reload, dispatch: dispatch,
-                          showDownloads: .constant(false), surface: surface)
+            ForEach(appearance.stripCommands) { command in
+                EditableControl(model: model, command: command, dispatch: dispatch,
+                                editing: editing, surface: surface,
+                                swap: { appearance.moveToCorner(command.rawValue) },
+                                remove: { appearance.disableControl(command.rawValue) })
+            }
+            // An emptied shelf still needs somewhere to drop onto.
+            if editing && appearance.stripCommands.isEmpty {
+                RoundedRectangle(cornerRadius: appearance.radius(.small))
+                    .strokeBorder(appearance.secondaryText(on: surface).opacity(0.5),
+                                  style: StrokeStyle(lineWidth: 1, dash: [3]))
+                    .frame(width: 26, height: 22)
+            }
         }
+        .padding(.vertical, editing ? 1 : 0).padding(.horizontal, editing ? 3 : 0)
+        .background(RoundedRectangle(cornerRadius: appearance.radius(.small))
+            .fill(dropTargeted ? appearance.accent.opacity(0.18) : .clear))
+        .dropDestination(for: ControlDrag.self) { items, _ in
+            guard editing, let drag = items.first else { return false }
+            withAnimation(Motion.update) { appearance.moveToStrip(drag.command) }
+            return true
+        } isTargeted: { dropTargeted = editing && $0 }
     }
 
     var body: some View {
@@ -1926,31 +2204,33 @@ private struct MinimalChrome: View {
             // The way back: with the sidebar away, its toggle moves up here.
             if !model.sidebarVisible {
                 CommandButton(model: model, command: .toggleSidebar, dispatch: dispatch,
-                              showDownloads: .constant(false), surface: surface)
+                              surface: surface)
             }
             if navOnLeft { nav }
-            Spacer(minLength: 0)
-            if !navOnLeft { nav }
-        }
-        // Centered on the window, not on what's left between the clusters —
-        // and therefore in register with the suggestion panel below.
-        .overlay {
+            // The field runs the whole way between the clusters — the strip
+            // is the address bar, edge to edge, with the host centered at
+            // rest by the pill's own compact styling.
             if !model.isSplit {
                 AddressField(address: $address, focused: addressFocused, highlighted: $highlighted,
                              suggestionCount: suggestionCount, activate: activate,
                              style: .pill, surface: surface,
                              trust: { model.activeTab?.serverTrust })
-                    .frame(maxWidth: addressFocused.wrappedValue ? 640 : 420)
                     .background((addressFocused.wrappedValue ? appearance.hover : .clear),
                                 in: RoundedRectangle(cornerRadius: appearance.radius(.pill)))
                     .animation(Motion.arrive, value: addressFocused.wrappedValue)
+            } else {
+                Spacer(minLength: 0)
             }
+            if !navOnLeft { nav }
         }
         .padding(.horizontal, 12).padding(.vertical, 3)
         .frame(height: 36)
         .background {
             ZStack {
-                WindowDragArea()
+                // Not while editing: the drag surface answers mouse-downs
+                // before SwiftUI's drag can, and a button dragged toward the
+                // corner kit took the whole window with it.
+                if !editing { WindowDragArea() }
                 surface.opacity(appearance.containerOpacity).allowsHitTesting(false)
             }
         }

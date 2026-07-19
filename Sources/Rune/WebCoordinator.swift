@@ -38,6 +38,8 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
                 tab.selection = nil
             case "audio":
                 tab.isPlayingAudio = body["playing"] as? Bool ?? false
+            case "scroll":
+                tab.scrolledDown = body["down"] as? Bool ?? false
             case "contextTarget":
                 guard let runeView = webView as? RuneWebView else { return }
                 let media = (body["src"] as? String).flatMap { URL(string: $0) }
@@ -129,6 +131,8 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
         // Nor is the old page's tint, nor its security verdict.
         tab.themeColor = webView.themeColor
         tab.securityFailure = nil
+        // A fresh page starts at its top, chrome shown.
+        tab.scrolledDown = false
     }
 
     /// TLS said no. The system already refused the connection — this only

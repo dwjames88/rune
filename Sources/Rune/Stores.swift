@@ -556,8 +556,14 @@ extension Notification.Name {
     static let finderToast = Notification.Name("rune.finderToast")
     static let frontBrowserWindow = Notification.Name("rune.frontBrowserWindow")
     static let showFindBar = Notification.Name("rune.showFindBar")
-    static let showDownloads = Notification.Name("rune.showDownloads")
     static let showNewTabOverlay = Notification.Name("rune.showNewTabOverlay")
+    /// Wiggle mode: the strip and corner kit start (or stop) taking edits.
+    static let toggleControlEdit = Notification.Name("rune.toggleControlEdit")
+    /// Open the Finder window already turned to its Downloads section.
+    static let finderShowDownloads = Notification.Name("rune.finderShowDownloads")
     static let glanceLink = Notification.Name("rune.glanceLink")
     static let blockingSettingsChanged = Notification.Name("rune.blockingSettingsChanged")
+    /// A left click landed on a page. Address bars listen and let focus go —
+    /// clicking the web is leaving the field.
+    static let pageClicked = Notification.Name("rune.pageClicked")
 }

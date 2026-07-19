@@ -70,6 +70,12 @@ cat > "$APP/Contents/Info.plist" <<PLIST
         <key>UTTypeConformsTo</key><array><string>public.data</string></array>
         <key>UTTypeTagSpecification</key><dict/>
       </dict>
+      <dict>
+        <key>UTTypeIdentifier</key><string>com.dwjames.Rune.control</string>
+        <key>UTTypeDescription</key><string>Rune Control Button</string>
+        <key>UTTypeConformsTo</key><array><string>public.data</string></array>
+        <key>UTTypeTagSpecification</key><dict/>
+      </dict>
     </array>
     <key>NSServices</key>
     <array>
