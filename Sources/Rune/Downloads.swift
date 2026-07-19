@@ -189,6 +189,9 @@ final class DownloadStore: ObservableObject {
 /// lives there now, not in an overlay.
 struct DownloadsButton: View {
     @ObservedObject var downloads: DownloadStore
+    /// On glass (the corner kit) it inks with the semantic label colour so it
+    /// matches the other icons; on the solid chrome bar it keeps chrome ink.
+    var onGlass = false
     let action: () -> Void
     @EnvironmentObject var appearance: AppearanceStore
 
@@ -214,7 +217,8 @@ struct DownloadsButton: View {
             }
         }
         .buttonStyle(.plain)
-        .foregroundStyle(appearance.secondaryText(on: appearance.chrome))
+        .foregroundStyle(onGlass ? AnyShapeStyle(.secondary)
+                                 : AnyShapeStyle(appearance.secondaryText(on: appearance.chrome)))
         .help("Downloads (⌥⌘L)")
     }
 }
@@ -288,7 +292,7 @@ struct DownloadProgressCard: View {
                 .foregroundStyle(appearance.accent)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).lineLimit(1).font(appearance.type(.label))
-                    .foregroundStyle(appearance.chromeText)
+                    .foregroundStyle(.primary)
                 if let fraction = downloads.activeFraction {
                     ProgressView(value: fraction).progressViewStyle(.linear)
                         .tint(appearance.accent)

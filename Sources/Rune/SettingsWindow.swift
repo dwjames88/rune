@@ -134,6 +134,8 @@ private struct AppearancePane: View {
     @ObservedObject var appearance: AppearanceStore
     var a: Binding<Appearance> { $appearance.appearance }
 
+    private var glassAvailable: Bool { if #available(macOS 26, *) { true } else { false } }
+
     var body: some View {
         Form {
             Section("Colors") {
@@ -182,13 +184,21 @@ private struct AppearancePane: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
+                Toggle("Liquid Glass", isOn: a.liquidGlass)
+                if appearance.appearance.liquidGlass {
+                    Toggle("Tint the glass with the accent", isOn: a.glassTinted)
+                    Toggle("Lift under the pointer", isOn: a.glassInteractive)
+                }
+            } header: {
+                Text("Glass")
+            } footer: {
+                Text("The floating surfaces — command palette, panels, popovers, the corner kit and its grab tab — wear native Liquid Glass on macOS 26 and later. Off falls back to frosted material everywhere. \(glassAvailable ? "" : "This Mac renders the material fallback.")")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
                 Picker("Chrome", selection: a.chromeStyle) {
                     Text("Minimal — navigation and the address").tag("floating")
                     Text("Classic — the full toolbar").tag("attached")
-                }
-                Picker("Back / Forward", selection: a.navPlacement) {
-                    Text("Left of the address").tag("left")
-                    Text("Right of the address").tag("right")
                 }
                 Toggle("Compact address bar", isOn: a.compactAddressBar)
                 Picker("Align the address", selection: a.addressAlignment) {
@@ -207,7 +217,7 @@ private struct AppearancePane: View {
             } header: {
                 Text("Toolbar")
             } footer: {
-                Text("Minimal chrome keeps navigation and the address in the strip and the sidebar toggle by the traffic lights. Checked commands live either in the strip or behind the grab tab at the page's bottom right — View → Customize Controls starts wiggle mode, where you drag buttons between the two. Classic chrome shows everything as a toolbar instead.")
+                Text("Checked commands are placed on one of three shelves: a cluster on either side of the address, or behind the grab tab at the page's bottom right. View → Customize Controls starts wiggle mode, where you drag a button between them (or click it to cycle) — back, forward and reload included. The sidebar toggle keeps its home by the traffic lights. Classic chrome shows everything as one toolbar instead.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Start Page") {
@@ -267,7 +277,7 @@ private struct AppearancePane: View {
             set: { on in
                 // The store's verbs, so the strip list stays consistent —
                 // unchecking here is the same act as wiggle mode's minus.
-                if on { appearance.moveToCorner(command.rawValue) }
+                if on { appearance.move(command.rawValue, to: .corner) }
                 else { appearance.disableControl(command.rawValue) }
             })
     }
