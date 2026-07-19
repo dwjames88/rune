@@ -71,10 +71,11 @@ struct Appearance: Codable, Equatable {
     /// Glass that lifts and refracts under the pointer (native interactive).
     var glassInteractive = true
 
-    // App icon: "default" = the bundled Icon Composer icon; a hex on either
-    // token switches to a natively-rendered variant (see AppIconRenderer).
-    var appIconBackground = "default"
-    var appIconGlyph = "default"
+    // App icon. "" = the build's own bundle icon (Rune in a release, the
+    // Development icon in a dev build), which the system adapts to light/dark
+    // on its own; "default" is the main Rune icon explicitly; otherwise the
+    // basename of an Icon Composer bundle a developer dropped in Assets/Icons.
+    var appIconName = ""
 
     static let `default` = Appearance()
 
@@ -89,7 +90,7 @@ struct Appearance: Codable, Equatable {
         case startPageGreeting, startPageShowFavorites, startPageShowRecents, startPageBackground
         case hideTrafficLights, windowOpacity, blur, grain
         case liquidGlass, glassTinted, glassInteractive
-        case appIconBackground, appIconGlyph
+        case appIconName
     }
 
     /// Retired keys, decoded only to carry an older appearance.json forward.
@@ -140,8 +141,7 @@ struct Appearance: Codable, Equatable {
         liquidGlass = try c.decodeIfPresent(Bool.self, forKey: .liquidGlass) ?? d.liquidGlass
         glassTinted = try c.decodeIfPresent(Bool.self, forKey: .glassTinted) ?? d.glassTinted
         glassInteractive = try c.decodeIfPresent(Bool.self, forKey: .glassInteractive) ?? d.glassInteractive
-        appIconBackground = try c.decodeIfPresent(String.self, forKey: .appIconBackground) ?? d.appIconBackground
-        appIconGlyph = try c.decodeIfPresent(String.self, forKey: .appIconGlyph) ?? d.appIconGlyph
+        appIconName = try c.decodeIfPresent(String.self, forKey: .appIconName) ?? d.appIconName
     }
 }
 
@@ -185,6 +185,50 @@ final class AppearanceStore: ObservableObject {
         Storage.saveJSON(presets, to: "presets.json")
     }
     func resetToDefault() { appearance = .default }
+
+    // MARK: App icon options
+
+    /// A dev build (built by dev-run.sh) — it wears the Development icon and
+    /// offers it as an option; a release does neither.
+    static let isDevBuild = Bundle.main.object(forInfoDictionaryKey: "RuneDevBuild") != nil
+
+    /// The alternate icons compiled into the app — the main "Default" tile
+    /// plus one per `.icon` bundle in Assets/Icons (and Development in a dev
+    /// build). "Default" is the reference for the main icon and isn't listed
+    /// again as an option.
+    static let iconOptions: [String] = {
+        guard let dir = Bundle.main.url(forResource: "AppIcons", withExtension: nil),
+              let files = try? FileManager.default.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: nil) else { return [] }
+        return files.filter { $0.pathExtension == "icns" }
+            .map { $0.deletingPathExtension().lastPathComponent }
+            .filter { $0.lowercased() != "default" }
+            .sorted()
+    }()
+
+    /// The resolved selection: an empty stored name means "the build's own
+    /// icon" — the Development icon in a dev build, the main Rune icon in a
+    /// release. Drives both the Dock and which tile the picker highlights.
+    var appIconSelection: String {
+        appearance.appIconName.isEmpty ? (Self.isDevBuild ? "Development" : "default")
+                                       : appearance.appIconName
+    }
+
+    /// The image for an icon option — used both to set the Dock icon and to
+    /// preview the choices in Settings. "default" is the bundled main-Rune
+    /// reference; a name is a compiled option.
+    func iconImage(_ name: String) -> NSImage? {
+        let file = name == "default" ? "Default" : name
+        return Bundle.main.url(forResource: file, withExtension: "icns", subdirectory: "AppIcons")
+            .flatMap { NSImage(contentsOf: $0) }
+            ?? NSImage(named: NSImage.applicationIconName)
+    }
+
+    /// The chosen icon for the Dock, or nil to hand the job back to the system
+    /// (the bundle's own icon, which adapts to light/dark on macOS 26+).
+    func appIcon() -> NSImage? {
+        appearance.appIconName.isEmpty ? nil : iconImage(appIconSelection)
+    }
 
     // MARK: Control placement (wiggle mode)
 

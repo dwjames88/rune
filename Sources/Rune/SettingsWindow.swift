@@ -227,20 +227,25 @@ private struct AppearancePane: View {
                 ColorTokenRow(label: "Background", token: a.startPageBackground)
             }
             Section {
-                HStack(spacing: 14) {
-                    Image(nsImage: appIconPreview)
-                        .resizable().scaledToFit().frame(width: 56, height: 56)
-                    Toggle("Custom app icon", isOn: customIconOn)
-                    Spacer()
-                }
-                if appearance.appearance.appIconBackground != "default" {
-                    ColorTokenRow(label: "Background", token: a.appIconBackground, allowSystem: false)
-                    ColorTokenRow(label: "Rune", token: a.appIconGlyph, allowSystem: false)
+                // A row of live thumbnails, each rendered under the chosen
+                // appearance, so you see the icons rather than read their names.
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 14) {
+                        ForEach(["default"] + AppearanceStore.iconOptions, id: \.self) { name in
+                            IconThumb(
+                                title: name == "default" ? "Rune" : name,
+                                image: appearance.iconImage(name),
+                                selected: appearance.appIconSelection == name,
+                                accent: appearance.accent)
+                            { appearance.appearance.appIconName = name }
+                        }
+                    }
+                    .padding(.vertical, 2)
                 }
             } header: {
                 Text("App Icon")
             } footer: {
-                Text("Custom icons are drawn from the rune glyph in your colors and apply to the Dock while Rune runs. Off = the bundled icon.")
+                Text("Sets the Dock icon while Rune runs. Drop Icon Composer (.icon) files into Assets/Icons to offer more here. Each icon adapts to your system's light, dark or tinted appearance automatically (macOS 26+, System Settings → Appearance).")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Window") {
@@ -253,20 +258,6 @@ private struct AppearancePane: View {
             }
         }
         .formStyle(.grouped)
-    }
-
-    private var customIconOn: Binding<Bool> {
-        Binding(
-            get: { appearance.appearance.appIconBackground != "default" },
-            set: { on in
-                appearance.appearance.appIconBackground = on ? "#48D4EA" : "default"
-                appearance.appearance.appIconGlyph = on ? "#002678" : "default"
-            })
-    }
-
-    private var appIconPreview: NSImage {
-        AppIconRenderer.custom(for: appearance.appearance, size: 256)
-            ?? (NSImage(named: NSImage.applicationIconName) ?? NSImage())
     }
 
     /// Membership toggle for a command in the toolbar button list — checking
@@ -289,6 +280,40 @@ private struct AppearancePane: View {
             Text("\(Int(value.wrappedValue)) \(suffix)").monospacedDigit().foregroundStyle(.secondary)
                 .frame(width: 58, alignment: .trailing)
         }
+    }
+}
+
+/// One app-icon choice: its live thumbnail with a selection ring and a name.
+private struct IconThumb: View {
+    let title: String
+    let image: NSImage?
+    let selected: Bool
+    let accent: Color
+    let select: () -> Void
+
+    var body: some View {
+        Button(action: select) {
+            VStack(spacing: 5) {
+                Group {
+                    if let image {
+                        Image(nsImage: image).resizable().interpolation(.high).scaledToFit()
+                    } else {
+                        RoundedRectangle(cornerRadius: 11, style: .continuous)
+                            .fill(Color.secondary.opacity(0.15))
+                            .overlay(Image(systemName: "app.dashed").foregroundStyle(.secondary))
+                    }
+                }
+                .frame(width: 52, height: 52)
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(selected ? accent : .clear, lineWidth: 2.5))
+                Text(title).font(.caption)
+                    .foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                    .lineLimit(1)
+            }
+            .frame(width: 64)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

@@ -21,40 +21,30 @@ if [ "$CONFIG" = "release" ]; then
     strip -rSTx "$APP/Contents/MacOS/Rune"
 fi
 
-# App icon. Preferred path: compile the Icon Composer bundle with actool —
-# produces Assets.car (the real layered icon on macOS 26+) plus a legacy
-# Rune.icns. Falls back to sips/iconutil from the 1024px PNG when the Xcode
-# tools aren't available. Cached in .build until the source changes.
-ICON_COMPOSER="$REPO_ROOT/Assets/Main Icon/Rune.icon"
-ICON_SRC="$REPO_ROOT/Assets/Rune-iOS-Default-1024@1x.png"
+# App icon. Dev builds wear the Development icon so they're distinct in the
+# Dock from a real install. actool compiles the Icon Composer bundle into
+# Assets.car (the layered, appearance-aware icon on macOS 26+) plus a .icns.
+ICON_NAME="Development"
+ICON_COMPOSER="$REPO_ROOT/Assets/Dev Icon/Development.icon"
 ICON_CACHE="$REPO_ROOT/.build/icon"
 if [ -d "$ICON_COMPOSER" ] && xcrun --find actool >/dev/null 2>&1; then
-    if [ ! -f "$ICON_CACHE/Assets.car" ] || \
-       [ -n "$(find "$ICON_COMPOSER" -newer "$ICON_CACHE/Assets.car" 2>/dev/null)" ]; then
+    if [ ! -f "$ICON_CACHE/$ICON_NAME.icns" ] || \
+       [ -n "$(find "$ICON_COMPOSER" -newer "$ICON_CACHE/$ICON_NAME.icns" 2>/dev/null)" ]; then
         mkdir -p "$ICON_CACHE"
         xcrun actool \
-            --app-icon Rune --include-all-app-icons \
+            --app-icon "$ICON_NAME" --include-all-app-icons \
             --compile "$ICON_CACHE" \
             --platform macosx --minimum-deployment-target 26.0 \
             --output-partial-info-plist "$ICON_CACHE/partial.plist" \
             "$ICON_COMPOSER" >/dev/null
     fi
-    cp "$ICON_CACHE/Assets.car" "$ICON_CACHE/Rune.icns" "$APP/Contents/Resources/"
-elif [ -f "$ICON_SRC" ]; then
-    ICNS="$REPO_ROOT/.build/Rune.icns"
-    if [ ! -f "$ICNS" ] || [ "$ICON_SRC" -nt "$ICNS" ]; then
-        ICONSET="$(mktemp -d)/Rune.iconset"
-        mkdir -p "$ICONSET"
-        for size in 16 32 128 256 512; do
-            sips -z "$size" "$size" "$ICON_SRC" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
-            double=$((size * 2))
-            sips -z "$double" "$double" "$ICON_SRC" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
-        done
-        iconutil -c icns "$ICONSET" -o "$ICNS"
-        rm -rf "$(dirname "$ICONSET")"
-    fi
-    cp "$ICNS" "$APP/Contents/Resources/Rune.icns"
+    cp "$ICON_CACHE/Assets.car" "$APP/Contents/Resources/"
+    cp "$ICON_CACHE/$ICON_NAME.icns" "$APP/Contents/Resources/"
 fi
+
+# Alternate icons the user can pick in Settings. Assets/Icons ships in every
+# build; the Dev Icon is added here so it's only selectable in dev builds.
+"$REPO_ROOT/scripts/build-icon-options.sh" "$APP" "$REPO_ROOT/Assets/Dev Icon" || true
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -67,8 +57,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleExecutable</key><string>Rune</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
-    <key>CFBundleIconFile</key><string>Rune</string>
-    <key>CFBundleIconName</key><string>Rune</string>
+    <key>CFBundleIconFile</key><string>Development</string>
+    <key>CFBundleIconName</key><string>Development</string>
+    <key>RuneDevBuild</key><true/>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>CFBundleURLTypes</key>

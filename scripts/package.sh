@@ -33,6 +33,9 @@ if [ -d "$ICON_COMPOSER" ] && xcrun --find actool >/dev/null 2>&1; then
 fi
 rm -rf "$ICON_TMP"
 
+# Alternate icons the user can pick in Settings (Assets/Icons/*.icon).
+"$REPO_ROOT/scripts/build-icon-options.sh" "$APP" || true
+
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
