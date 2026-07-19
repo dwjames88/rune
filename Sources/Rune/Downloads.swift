@@ -115,9 +115,14 @@ final class DownloadStore: ObservableObject {
     func add(_ item: DownloadItem) {
         items.insert(item, at: 0)
         // Aggregate from the items rather than having each report upward.
+        // receive(on:) is load-bearing: @Published publishes on willSet, so a
+        // same-tick recompute still reads the OLD state — which left the
+        // progress card on stage forever after a cancel, the one state
+        // change that no later progress tick arrives to correct.
         var watch: Set<AnyCancellable> = []
-        item.$completed.sink { [weak self] _ in self?.recompute() }.store(in: &watch)
-        item.$state.sink { [weak self] state in
+        item.$completed.receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.recompute() }.store(in: &watch)
+        item.$state.receive(on: RunLoop.main).sink { [weak self] state in
             if state == .finished { self?.hasUnseen = true }
             self?.recompute()
         }.store(in: &watch)
@@ -128,6 +133,13 @@ final class DownloadStore: ObservableObject {
     func clearFinished() {
         for item in items where !item.isRunning { watches[item.id] = nil }
         items.removeAll { !$0.isRunning }
+        recompute()
+    }
+
+    /// Drop one row — a retry replaces it with a fresh download.
+    func remove(_ item: DownloadItem) {
+        watches[item.id] = nil
+        items.removeAll { $0.id == item.id }
         recompute()
     }
 
@@ -173,13 +185,15 @@ final class DownloadStore: ObservableObject {
 
 /// Toolbar button: a tray icon that becomes a progress ring while files are in
 /// flight, with a dot when something finished you haven't looked at.
+/// Pressing it opens the Downloads section of the Rune Finder — the list
+/// lives there now, not in an overlay.
 struct DownloadsButton: View {
     @ObservedObject var downloads: DownloadStore
-    @Binding var showing: Bool
+    let action: () -> Void
     @EnvironmentObject var appearance: AppearanceStore
 
     var body: some View {
-        Button { showing.toggle() } label: {
+        Button(action: action) {
             ZStack {
                 Image(systemName: "arrow.down.circle")
                     .font(.system(size: 13, weight: .medium))
@@ -205,71 +219,93 @@ struct DownloadsButton: View {
     }
 }
 
-/// The list itself. Lives as a panel in the content area rather than a popover
-/// on the button, so ⌥⌘L works whether or not the button is in your toolbar.
-struct DownloadsPanel: View {
+/// The list, as a Finder pane: ⌥⌘L and the toolbar button land here now,
+/// where a file you kept can be found next to everything else you've kept —
+/// not in an overlay racing you to disappear.
+struct DownloadsList: View {
     @ObservedObject var downloads: DownloadStore
-    @Binding var showing: Bool
+    var query = ""
+    /// How to try a failed row again — provided by whoever has a web view.
+    var retry: ((DownloadItem) -> Void)? = nil
     @EnvironmentObject var appearance: AppearanceStore
 
-    /// You opened this to glance at it, so it puts itself away. The pointer
-    /// resting on it is you still reading — the clock only runs while you're
-    /// not there, and starts over the moment you leave.
-    @State private var idle: Task<Void, Never>?
-    private static let patience = Duration.seconds(10)
+    private var rows: [DownloadItem] {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return downloads.items }
+        return downloads.items.filter { $0.filename.localizedCaseInsensitiveContains(q) }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Downloads").font(appearance.font(13, weight: .semibold))
+        if rows.isEmpty {
+            VStack(spacing: 6) {
                 Spacer()
-                if downloads.items.contains(where: { !$0.isRunning }) {
-                    Button("Clear") { downloads.clearFinished() }
-                        .buttonStyle(.plain).font(appearance.font(11))
-                        .foregroundStyle(appearance.accent)
-                }
+                Image(systemName: "arrow.down.circle").font(.system(size: 28))
+                    .foregroundStyle(appearance.secondaryText(on: appearance.windowBG))
+                Text(query.isEmpty ? "Nothing downloaded this session." : "No downloads match.")
+                    .font(appearance.type(.body))
+                    .foregroundStyle(appearance.secondaryText(on: appearance.windowBG))
+                Spacer()
             }
-            .padding(.horizontal, 12).padding(.vertical, 9)
-            .foregroundStyle(appearance.chromeText)
-
-            if downloads.items.isEmpty {
-                Text("Nothing downloaded yet.")
-                    .font(appearance.font(12))
-                    .foregroundStyle(appearance.secondaryText(on: appearance.chrome))
-                    .padding(.horizontal, 12).padding(.bottom, 12)
-            } else {
-                Divider()
-                ScrollView {
-                    VStack(spacing: 0) {
-                        ForEach(downloads.items) { DownloadRow(item: $0) }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollView {
+                VStack(spacing: 0) {
+                    if downloads.items.contains(where: { !$0.isRunning }) {
+                        HStack {
+                            Spacer()
+                            Button("Clear Finished") { downloads.clearFinished() }
+                                .buttonStyle(.plain).font(appearance.font(11))
+                                .foregroundStyle(appearance.accent)
+                        }
+                        .padding(.horizontal, 14).padding(.top, 10)
+                    }
+                    ForEach(rows) { item in
+                        DownloadRow(item: item, retry: retry.map { r in { r(item) } })
                     }
                 }
-                .frame(maxHeight: 260)
+                .padding(.vertical, 4)
             }
         }
-        .frame(maxWidth: 320)
-        .runeSurface(appearance, .large)
-        // Hovering covers clicking too: to press Clear or open a download you
-        // have to be on the panel, which is already the clock stopped.
-        .onHover { inside in inside ? hold() : countDown() }
-        .onAppear { countDown() }
-        .onDisappear { hold() }
     }
-
-    private func countDown() {
-        idle?.cancel()
-        idle = Task { @MainActor in
-            try? await Task.sleep(for: Self.patience)
-            guard !Task.isCancelled else { return }
-            showing = false
-        }
-    }
-
-    private func hold() { idle?.cancel(); idle = nil }
 }
 
-private struct DownloadRow: View {
+/// The quiet word from the corner while bytes land: one card, bottom-left,
+/// naming the file (or counting them) with a live bar. It leaves when the
+/// downloads do — completion's badge lives on the corner kit's grab tab.
+struct DownloadProgressCard: View {
+    @ObservedObject var downloads: DownloadStore
+    @EnvironmentObject var appearance: AppearanceStore
+
+    private var title: String {
+        let running = downloads.items.filter(\.isRunning)
+        return running.count == 1 ? (running.first?.filename ?? "Downloading")
+                                  : "\(running.count) downloads"
+    }
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: "arrow.down.circle").font(.system(size: 14))
+                .foregroundStyle(appearance.accent)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).lineLimit(1).font(appearance.type(.label))
+                    .foregroundStyle(appearance.chromeText)
+                if let fraction = downloads.activeFraction {
+                    ProgressView(value: fraction).progressViewStyle(.linear)
+                        .tint(appearance.accent)
+                } else {
+                    ProgressView().progressViewStyle(.linear).tint(appearance.accent)
+                }
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .frame(width: 230)
+        .runeSurface(appearance, .large)
+    }
+}
+
+struct DownloadRow: View {
     @ObservedObject var item: DownloadItem
+    var retry: (() -> Void)? = nil
     @EnvironmentObject var appearance: AppearanceStore
     @State private var hovering = false
 
@@ -295,6 +331,12 @@ private struct DownloadRow: View {
                 Button { item.cancel() } label: { Image(systemName: "xmark.circle.fill") }
                     .buttonStyle(.plain).help("Cancel")
                     .foregroundStyle(appearance.secondaryText(on: appearance.chrome))
+            } else if case .failed = item.state, let retry {
+                // Cancelled or broken — the source URL is still known, so the
+                // row offers to go get it again.
+                Button(action: retry) { Image(systemName: "arrow.clockwise.circle.fill") }
+                    .buttonStyle(.plain).help("Try Again")
+                    .foregroundStyle(appearance.accent)
             } else if item.state == .finished, hovering {
                 Button { item.reveal() } label: { Image(systemName: "magnifyingglass.circle.fill") }
                     .buttonStyle(.plain).help("Show in Finder")

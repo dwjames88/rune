@@ -191,6 +191,11 @@ private struct AppearancePane: View {
                     Text("Right of the address").tag("right")
                 }
                 Toggle("Compact address bar", isOn: a.compactAddressBar)
+                Picker("Align the address", selection: a.addressAlignment) {
+                    Text("Left").tag("left")
+                    Text("Centered").tag("center")
+                    Text("Right").tag("right")
+                }
                 ForEach(Command.allCases) { command in
                     Toggle(isOn: toolbarBinding(command)) {
                         HStack(spacing: 8) {
@@ -202,7 +207,7 @@ private struct AppearancePane: View {
             } header: {
                 Text("Toolbar")
             } footer: {
-                Text("Minimal chrome keeps navigation and the address in the strip and the sidebar toggle by the traffic lights. The checked commands below become the corner kit — the ••• circle at the page's bottom right that opens on hover. Classic chrome shows them as a toolbar instead.")
+                Text("Minimal chrome keeps navigation and the address in the strip and the sidebar toggle by the traffic lights. Checked commands live either in the strip or behind the grab tab at the page's bottom right — View → Customize Controls starts wiggle mode, where you drag buttons between the two. Classic chrome shows everything as a toolbar instead.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Start Page") {
@@ -260,10 +265,10 @@ private struct AppearancePane: View {
         Binding(
             get: { appearance.appearance.toolbarButtons.contains(command.rawValue) },
             set: { on in
-                var buttons = appearance.appearance.toolbarButtons
-                buttons.removeAll { $0 == command.rawValue }
-                if on { buttons.append(command.rawValue) }
-                appearance.appearance.toolbarButtons = buttons
+                // The store's verbs, so the strip list stays consistent —
+                // unchecking here is the same act as wiggle mode's minus.
+                if on { appearance.moveToCorner(command.rawValue) }
+                else { appearance.disableControl(command.rawValue) }
             })
     }
 

@@ -76,6 +76,18 @@ enum PageBridge {
       // scrolling must never pay for the bridge.
       document.addEventListener('scroll', clearHover, true);
 
+      // The corner kit's grab tab ducks while you read downward. Only a
+      // *change* of direction crosses the bridge, so a long scroll costs one
+      // message, not one per frame.
+      let lastY = 0, wentDown = false;
+      document.addEventListener('scroll', () => {
+        const y = window.scrollY || 0;
+        const down = y > lastY + 2 ? true : (y < lastY - 2 ? false : wentDown);
+        lastY = y;
+        const next = y < 40 ? false : down;   // near the top is always "shown"
+        if (next !== wentDown) { wentDown = next; post({ type: 'scroll', down: next }); }
+      }, { passive: true, capture: true });
+
       // Media under the cursor: tracked locally on mouseover (no bridge
       // traffic); read by the context menu and the ⌥S save-under-cursor
       // command via window.__runeMedia().

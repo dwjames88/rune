@@ -380,7 +380,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func dispatch(_ command: Command) {
         // Commands that act on the browser should be seen acting: invoked from
         // the Finder window, ⌘K/⌘T/⌘L would otherwise work invisibly behind it.
-        let worksAnywhere: Set<Command> = [.openFinder, .openSettings, .closeTab, .newPrivateWindow]
+        let worksAnywhere: Set<Command> = [.openFinder, .openSettings, .closeTab, .newPrivateWindow,
+                                          .showDownloads]
         if finderWindow.isKey, !worksAnywhere.contains(command) {
             window?.makeKeyAndOrderFront(nil)
         }
@@ -412,7 +413,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .zoomOut: model.zoom(.smaller)
         case .zoomReset: model.zoom(.reset)
         case .printPage: model.printPage()
-        case .showDownloads: show(.showDownloads)
+        case .showDownloads: finderWindow.showDownloads()
         case .toggleBlocking: model.toggleBlockingForActiveSite()
         case .toggleSplit: model.toggleSplit()
         case .togglePanel: model.togglePanel()
@@ -434,6 +435,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .pinTab: if let t = model.activeTab { model.pin(t) }
         case .nextTab: model.selectAdjacentSession(1)
         case .previousTab: model.selectAdjacentSession(-1)
+        case .editControls: show(.toggleControlEdit)
         case .openSettings: settingsWindow.show()
         }
     }
