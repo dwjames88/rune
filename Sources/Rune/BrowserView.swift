@@ -293,11 +293,20 @@ private struct FaviconTile: View {
     let selected: Bool
     @EnvironmentObject var appearance: AppearanceStore
 
+    /// A legibility chip that reads off the sidebar it sits on: light enough
+    /// to lift a dark favicon on a dark sidebar, a hair darker than a light
+    /// one. Without it a black favicon on a dark sidebar simply vanished.
+    private var plate: Color {
+        if selected { return appearance.selection }
+        return appearance.sidebarBG.prefersLightText
+            ? Color.white.opacity(0.22)
+            : Color.black.opacity(0.05)
+    }
+
     var body: some View {
         Favicon(png: saved.faviconPNG, name: saved.name, size: 20)
             .frame(width: 34, height: 34)
-            .background(RoundedRectangle(cornerRadius: appearance.cornerRadius)
-                .fill(selected ? appearance.selection : appearance.hover))
+            .background(RoundedRectangle(cornerRadius: appearance.cornerRadius).fill(plate))
             .overlay(RoundedRectangle(cornerRadius: appearance.cornerRadius)
                 .strokeBorder(selected ? appearance.accent : .clear, lineWidth: 1.5))
             .help(saved.name)
@@ -1383,13 +1392,13 @@ private struct SuggestionList: View {
                 let on = index == highlighted
                 HStack(spacing: 9) {
                     Image(systemName: icon(item)).frame(width: 16)
-                        .foregroundStyle(on ? .white : appearance.secondaryText(on: base))
+                        .foregroundStyle(on ? appearance.accentSecondaryText : appearance.secondaryText(on: base))
                     Text(title(item)).lineLimit(1)
-                        .foregroundStyle(on ? .white : appearance.text(on: base))
+                        .foregroundStyle(on ? appearance.accentText : appearance.text(on: base))
                     Spacer()
                     if case .history(let e) = item {
                         Text(e.url).font(appearance.font(11)).lineLimit(1)
-                            .foregroundStyle(on ? .white.opacity(0.8) : appearance.secondaryText(on: base))
+                            .foregroundStyle(on ? appearance.accentSecondaryText : appearance.secondaryText(on: base))
                             .frame(maxWidth: 260, alignment: .trailing)
                     }
                 }
@@ -1897,21 +1906,27 @@ private struct CommandButton: View {
     let dispatch: (Command) -> Void
     /// What the button sits on; its ink keeps contrast against it.
     var surface: Color? = nil
+    /// Sitting on glass (or the material fallback), not a solid chrome colour —
+    /// ink with the semantic label colour so it adapts to the appearance the
+    /// glass is showing, not a chrome tint it no longer touches.
+    var onGlass = false
     @EnvironmentObject var appearance: AppearanceStore
 
     var body: some View {
         switch command {
         case .showDownloads:
-            DownloadsButton(downloads: model.downloads) { dispatch(command) }
-        case .goBack:
-            button(command.icon) { dispatch(command) }
-                .disabled(!(model.activeTab?.canGoBack ?? false)).help(command.title)
-        case .goForward:
-            button(command.icon) { dispatch(command) }
-                .disabled(!(model.activeTab?.canGoForward ?? false)).help(command.title)
-        case .reload:
-            button(model.activeTab?.isLoading == true ? "xmark" : command.icon) { dispatch(command) }
-                .help(command.title)
+            DownloadsButton(downloads: model.downloads, onGlass: onGlass) { dispatch(command) }
+        case .goBack, .goForward, .reload:
+            // These read the active tab's live state, so they must OBSERVE it:
+            // back/forward-cache restores don't fire `didCommit`, and this
+            // view watches the model, not the tab, so nothing here would
+            // otherwise re-render when canGoForward/isLoading changed.
+            if let tab = model.activeTab {
+                NavButton(tab: tab, command: command, dispatch: dispatch,
+                          surface: surface, onGlass: onGlass)
+            } else if command != .goForward {
+                button(command.icon) { dispatch(command) }.disabled(true).help(command.title)
+            }
         default:
             button(command.icon) { dispatch(command) }.help(command.title)
         }
@@ -1922,7 +1937,44 @@ private struct CommandButton: View {
             Image(systemName: symbol).font(.system(size: 13, weight: .medium)).frame(width: 26, height: 24)
         }
         .buttonStyle(.plain)
-        .foregroundStyle(appearance.secondaryText(on: surface ?? appearance.chrome))
+        .foregroundStyle(onGlass ? AnyShapeStyle(.secondary)
+                                 : AnyShapeStyle(appearance.secondaryText(on: surface ?? appearance.chrome)))
+    }
+}
+
+/// Back, forward and reload — the three buttons whose look depends on the
+/// active tab's live navigation state. It observes the tab, so it re-renders
+/// the moment canGoBack/canGoForward/isLoading move, even on a bfcache
+/// restore that fires no navigation delegate. Forward hides itself when
+/// there's nothing ahead; the strip closes the gap.
+private struct NavButton: View {
+    @ObservedObject var tab: Tab
+    let command: Command
+    let dispatch: (Command) -> Void
+    var surface: Color? = nil
+    var onGlass = false
+    @EnvironmentObject var appearance: AppearanceStore
+
+    var body: some View {
+        switch command {
+        case .goBack:
+            button(command.icon).disabled(!tab.canGoBack).help(command.title)
+        case .goForward:
+            if tab.canGoForward { button(command.icon).help(command.title) }
+        case .reload:
+            button(tab.isLoading ? "xmark" : command.icon).help(command.title)
+        default:
+            button(command.icon).help(command.title)
+        }
+    }
+
+    private func button(_ symbol: String) -> some View {
+        Button { dispatch(command) } label: {
+            Image(systemName: symbol).font(.system(size: 13, weight: .medium)).frame(width: 26, height: 24)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(onGlass ? AnyShapeStyle(.secondary)
+                                 : AnyShapeStyle(appearance.secondaryText(on: surface ?? appearance.chrome)))
     }
 }
 
@@ -1958,16 +2010,15 @@ private struct CornerToolbar: View {
         model.activeTab?.$scrolledDown.eraseToAnyPublisher() ?? Just(false).eraseToAnyPublisher()
     }
 
-    /// The tab's outline. A full pill while the kit is open; the docked grab
-    /// handle when it's closed — left corners rounded (8), right edge square,
-    /// because that edge is pressed against the window it hangs from.
+    /// The tab's outline: a handle hanging off the window's right edge —
+    /// left corners rounded 8, right edge square against the edge it's pulled
+    /// from. Fixed in both states (the glitch was the left corners morphing
+    /// from 8 to a pill radius as it opened); expanding is purely a width
+    /// change now.
     private var tabShape: UnevenRoundedRectangle {
-        let r = expanded ? appearance.radius(.pill) : 8
-        return UnevenRoundedRectangle(
-            topLeadingRadius: r, bottomLeadingRadius: r,
-            bottomTrailingRadius: expanded ? r : 0,
-            topTrailingRadius: expanded ? r : 0,
-            style: .continuous)
+        UnevenRoundedRectangle(topLeadingRadius: 8, bottomLeadingRadius: 8,
+                               bottomTrailingRadius: 0, topTrailingRadius: 0,
+                               style: .continuous)
     }
 
     var body: some View {
@@ -1976,19 +2027,23 @@ private struct CornerToolbar: View {
                 if expanded {
                     ForEach(commands) { command in
                         EditableControl(model: model, command: command, dispatch: dispatch,
-                                        editing: editing,
-                                        swap: { appearance.moveToStrip(command.rawValue) },
+                                        editing: editing, onGlass: true,
+                                        swap: { appearance.cycleSlot(command.rawValue) },
                                         remove: { appearance.disableControl(command.rawValue) })
                     }
                     if editing {
                         addMenu
                         Button { withAnimation(Motion.arrive) { editing = false } } label: {
-                            Image(systemName: "checkmark.circle.fill")
+                            // The circle checkmark, but inked with the primary
+                            // label colour like the + beside it — not the
+                            // accent, which washed the circle out whenever it
+                            // sat close to the glass colour.
+                            Image(systemName: "checkmark.circle")
                                 .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(.primary)
                                 .frame(width: 26, height: 24).contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .foregroundStyle(appearance.accent)
                         .help("Done")
                     }
                 }
@@ -1997,8 +2052,11 @@ private struct CornerToolbar: View {
                 // left. A slim grip the height of the icon glyphs; when the
                 // kit is open it sits in a button-width cell so it keeps the
                 // row's spacing instead of jamming against the last icon.
+                // `.primary` so it inks itself against the glass in either
+                // appearance, rather than tracking a chrome colour it no
+                // longer sits on.
                 Capsule()
-                    .fill(appearance.chromeText.opacity(0.72))
+                    .fill(Color.primary.opacity(0.7))
                     .frame(width: 6, height: 15)
                     .frame(width: expanded ? 18 : 6, height: 24)
                     .contentShape(Rectangle())
@@ -2012,22 +2070,23 @@ private struct CornerToolbar: View {
             // One padding for both states: the grip and the buttons wear the
             // same frame, so the surface never changes height on hover.
             .padding(.horizontal, 6).padding(.vertical, 2)
-            // The toolbar's own surface, visibly: material with a quiet gray
-            // over it, so the tab reads against the page it floats on. One
-            // shape serves both states — pill open, docked tab closed. Every
-            // layer lives in the background (behind the buttons) so none of
-            // them can eat a click; a stray fill overlay here silently ate
-            // the whole kit's taps.
-            .background {
-                tabShape.fill(.regularMaterial)
-                tabShape.fill(Color.primary.opacity(0.05))
-                tabShape.strokeBorder(appearance.hairline)
+            // The shared overlay surface — Liquid Glass where the OS has it,
+            // frosted material otherwise — in the tab's own shape (pill open,
+            // docked tab closed).
+            .runeSurface(appearance, in: tabShape)
+            // Drop-target ring rides on top; a stroke only catches the edge,
+            // and it's clear until a control is actually over it.
+            .overlay {
                 tabShape.strokeBorder(dropTargeted ? appearance.accent : .clear, lineWidth: 1.5)
+                    .allowsHitTesting(false)
             }
-            .shadow(color: .black.opacity(0.18), radius: 16, y: 7)
-            // Open, the kit keeps its inset; closed, the tab docks flush to
-            // the window edge; ducked, it slides all the way off.
-            .offset(x: ducked ? 72 : (expanded ? 0 : 12))
+            // Docked flush against the window's right edge in both states —
+            // the +12 cancels the container's trailing inset. It used to jump
+            // to inset-0 when it opened, which slid its bounds out from under
+            // a stationary cursor and made the hover flicker; holding it flush
+            // keeps the grip under the cursor as the kit pulls out leftward.
+            // Only ducking slides the whole tab off the edge.
+            .offset(x: ducked ? 72 : 12)
             .onHover { inside in
                 guard !editing else { return }
                 withAnimation(Motion.arrive) { open = inside }
@@ -2036,7 +2095,7 @@ private struct CornerToolbar: View {
             .animation(Motion.arrive, value: ducked)
             .dropDestination(for: ControlDrag.self) { items, _ in
                 guard editing, let drag = items.first else { return false }
-                withAnimation(Motion.update) { appearance.moveToCorner(drag.command) }
+                withAnimation(Motion.update) { appearance.move(drag.command, to: .corner) }
                 return true
             } isTargeted: { dropTargeted = editing && $0 }
             .onReceive(scrollPublisher) { pageScrolledDown = $0 }
@@ -2049,7 +2108,7 @@ private struct CornerToolbar: View {
         Menu {
             ForEach(Command.allCases.filter { !appearance.appearance.toolbarButtons.contains($0.rawValue) }) { command in
                 Button {
-                    withAnimation(Motion.update) { appearance.moveToCorner(command.rawValue) }
+                    withAnimation(Motion.update) { appearance.move(command.rawValue, to: .corner) }
                 } label: {
                     Label(command.title, systemImage: command.icon)
                 }
@@ -2061,7 +2120,7 @@ private struct CornerToolbar: View {
         }
         .menuStyle(.borderlessButton).menuIndicator(.hidden)
         .frame(width: 26)
-        .foregroundStyle(appearance.secondaryText(on: appearance.chrome))
+        .foregroundStyle(.secondary)
         .help("Add a control")
     }
 }
@@ -2078,6 +2137,7 @@ private struct EditableControl: View {
     let dispatch: (Command) -> Void
     let editing: Bool
     var surface: Color? = nil
+    var onGlass = false
     /// Send this button to the other shelf. Clicking a wiggling button does
     /// the same thing as dragging it across — the strip lives in the
     /// titlebar region, where the window frame outranks drag gestures often
@@ -2086,20 +2146,22 @@ private struct EditableControl: View {
     let remove: () -> Void
     @EnvironmentObject var appearance: AppearanceStore
 
+    private var ink: AnyShapeStyle {
+        onGlass ? AnyShapeStyle(.secondary)
+                : AnyShapeStyle(appearance.secondaryText(on: surface ?? appearance.chrome))
+    }
+
     var body: some View {
         if editing {
-            // A Button on purpose, twice over: a disabled control declines to
-            // start drags, and a passive view in the titlebar region hands
-            // its mouse-down to window-dragging — an enabled Button is the
-            // one thing that both keeps the click and lets the drag run.
-            Button { withAnimation(Motion.update) { swap() } } label: {
-                Image(systemName: command.icon)
-                    .font(.system(size: 13, weight: .medium))
-                    .frame(width: 26, height: 24)
-                    .foregroundStyle(appearance.secondaryText(on: surface ?? appearance.chrome))
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+            // A bare glyph, NOT a Button: a Button's press gesture wins over
+            // `.draggable` and the drag never starts. A tap gesture and a drag
+            // gesture coexist (tap = no travel, drag = travel), so a click
+            // still cycles the shelf and a drag still lifts the control.
+            Image(systemName: command.icon)
+                .font(.system(size: 13, weight: .medium))
+                .frame(width: 26, height: 24)
+                .foregroundStyle(ink)
+                .contentShape(Rectangle())
                 .modifier(Wiggle())
                 .draggable(ControlDrag(command: command.rawValue)) {
                     // The drag preview: the same glyph on a small chip.
@@ -2107,6 +2169,7 @@ private struct EditableControl: View {
                         .font(.system(size: 13, weight: .medium))
                         .frame(width: 26, height: 24)
                 }
+                .onTapGesture { withAnimation(Motion.update) { swap() } }
                 .overlay(alignment: .topLeading) {
                     Button(action: remove) {
                         Image(systemName: "minus.circle.fill")
@@ -2119,7 +2182,8 @@ private struct EditableControl: View {
                     .help("Remove")
                 }
         } else {
-            CommandButton(model: model, command: command, dispatch: dispatch, surface: surface)
+            CommandButton(model: model, command: command, dispatch: dispatch,
+                          surface: surface, onGlass: onGlass)
         }
     }
 }
@@ -2154,9 +2218,9 @@ private struct MinimalChrome: View {
 
     /// The active page's color, pushed as WebKit discovers it.
     @State private var tint: NSColor?
-    @State private var dropTargeted = false
+    /// Which strip cluster a drag is hovering, if any.
+    @State private var dropTarget: AppearanceStore.ControlSlot?
 
-    private var navOnLeft: Bool { appearance.appearance.navPlacement != "right" }
     private var surface: Color { tint.map(Color.init(nsColor:)) ?? appearance.chrome }
 
     /// The lights live in the sidebar; when it's away (or on the right), the
@@ -2170,18 +2234,18 @@ private struct MinimalChrome: View {
         model.activeTab?.$themeColor.eraseToAnyPublisher() ?? Just(nil).eraseToAnyPublisher()
     }
 
-    /// The strip's shelf of the control set — what wiggle mode drags in and
-    /// out. Which commands is a setting (`stripButtons`), like everything.
-    private var nav: some View {
+    /// One of the strip's two button clusters — either side of the address —
+    /// as a wiggle-mode drop target. An empty one still shows a landing spot
+    /// while editing so you can drop the first button into it.
+    private func cluster(_ slot: AppearanceStore.ControlSlot, _ commands: [Command]) -> some View {
         HStack(spacing: 2) {
-            ForEach(appearance.stripCommands) { command in
+            ForEach(commands) { command in
                 EditableControl(model: model, command: command, dispatch: dispatch,
                                 editing: editing, surface: surface,
-                                swap: { appearance.moveToCorner(command.rawValue) },
+                                swap: { appearance.cycleSlot(command.rawValue) },
                                 remove: { appearance.disableControl(command.rawValue) })
             }
-            // An emptied shelf still needs somewhere to drop onto.
-            if editing && appearance.stripCommands.isEmpty {
+            if editing && commands.isEmpty {
                 RoundedRectangle(cornerRadius: appearance.radius(.small))
                     .strokeBorder(appearance.secondaryText(on: surface).opacity(0.5),
                                   style: StrokeStyle(lineWidth: 1, dash: [3]))
@@ -2190,12 +2254,16 @@ private struct MinimalChrome: View {
         }
         .padding(.vertical, editing ? 1 : 0).padding(.horizontal, editing ? 3 : 0)
         .background(RoundedRectangle(cornerRadius: appearance.radius(.small))
-            .fill(dropTargeted ? appearance.accent.opacity(0.18) : .clear))
+            .fill(dropTarget == slot ? appearance.accent.opacity(0.18) : .clear))
         .dropDestination(for: ControlDrag.self) { items, _ in
             guard editing, let drag = items.first else { return false }
-            withAnimation(Motion.update) { appearance.moveToStrip(drag.command) }
+            withAnimation(Motion.update) { appearance.move(drag.command, to: slot) }
+            dropTarget = nil
             return true
-        } isTargeted: { dropTargeted = editing && $0 }
+        } isTargeted: { inside in
+            if inside && editing { dropTarget = slot }
+            else if dropTarget == slot { dropTarget = nil }
+        }
     }
 
     var body: some View {
@@ -2206,10 +2274,9 @@ private struct MinimalChrome: View {
                 CommandButton(model: model, command: .toggleSidebar, dispatch: dispatch,
                               surface: surface)
             }
-            if navOnLeft { nav }
-            // The field runs the whole way between the clusters — the strip
-            // is the address bar, edge to edge, with the host centered at
-            // rest by the pill's own compact styling.
+            // Two button clusters, one on each side of the address; drop a
+            // control into either. The field runs the whole way between them.
+            cluster(.leading, appearance.stripLeadingCommands)
             if !model.isSplit {
                 AddressField(address: $address, focused: addressFocused, highlighted: $highlighted,
                              suggestionCount: suggestionCount, activate: activate,
@@ -2221,7 +2288,7 @@ private struct MinimalChrome: View {
             } else {
                 Spacer(minLength: 0)
             }
-            if !navOnLeft { nav }
+            cluster(.trailing, appearance.stripTrailingCommands)
         }
         .padding(.horizontal, 12).padding(.vertical, 3)
         .frame(height: 36)

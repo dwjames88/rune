@@ -29,10 +29,12 @@ struct Appearance: Codable, Equatable {
     /// master "enabled" list; `stripButtons` says which of them live in the
     /// minimal strip rather than the corner kit.
     var toolbarButtons: [String] = ["toggleSidebar", "goBack", "goForward", "reload", "showDownloads"]
-    /// The subset of `toolbarButtons` worn by the minimal strip itself, in
-    /// order. Everything else enabled (bar the sidebar toggle, which has a
-    /// fixed home) waits in the corner kit. Wiggle mode drags between the two.
-    var stripButtons: [String] = ["goBack", "goForward", "reload"]
+    /// The strip carries two button clusters, one on each side of the address
+    /// field; these are the command rawValues in each, in order. Everything
+    /// else enabled (bar the sidebar toggle, which has a fixed home) waits in
+    /// the corner kit. Wiggle mode drags between all three shelves.
+    var stripLeadingButtons: [String] = ["goBack", "goForward", "reload"]
+    var stripTrailingButtons: [String] = []
     /// Show just the site's host in the address bar until you click it.
     var compactAddressBar = true
     /// Where the address text sits in the strip's field: "left", "center",
@@ -60,6 +62,15 @@ struct Appearance: Codable, Equatable {
     /// Film grain over the chrome, percent (0 = none).
     var grain: Double = 8
 
+    // Glass — the floating surfaces (palette, panels, popovers, the corner
+    // kit, the suggestion drop). On by default where the OS has real Liquid
+    // Glass; off falls back to frosted material everywhere.
+    var liquidGlass = true
+    /// Pour the accent through the glass instead of leaving it clear.
+    var glassTinted = false
+    /// Glass that lifts and refracts under the pointer (native interactive).
+    var glassInteractive = true
+
     // App icon: "default" = the bundled Icon Composer icon; a hex on either
     // token switches to a natively-rendered variant (see AppIconRenderer).
     var appIconBackground = "default"
@@ -73,11 +84,16 @@ struct Appearance: Codable, Equatable {
         case accent, sidebarColor, chromeColor, backgroundColor
         case fontName, fontSize, textColor
         case sidebarWidth, cornerRadius, sidebarOnRight
-        case toolbarButtons, stripButtons, compactAddressBar, addressAlignment, chromeStyle, navPlacement
+        case toolbarButtons, stripLeadingButtons, stripTrailingButtons
+        case compactAddressBar, addressAlignment, chromeStyle, navPlacement
         case startPageGreeting, startPageShowFavorites, startPageShowRecents, startPageBackground
         case hideTrafficLights, windowOpacity, blur, grain
+        case liquidGlass, glassTinted, glassInteractive
         case appIconBackground, appIconGlyph
     }
+
+    /// Retired keys, decoded only to carry an older appearance.json forward.
+    private enum LegacyKeys: String, CodingKey { case stripButtons }
 
     init() {}
 
@@ -95,11 +111,24 @@ struct Appearance: Codable, Equatable {
         cornerRadius = try c.decodeIfPresent(Double.self, forKey: .cornerRadius) ?? d.cornerRadius
         sidebarOnRight = try c.decodeIfPresent(Bool.self, forKey: .sidebarOnRight) ?? d.sidebarOnRight
         toolbarButtons = try c.decodeIfPresent([String].self, forKey: .toolbarButtons) ?? d.toolbarButtons
-        stripButtons = try c.decodeIfPresent([String].self, forKey: .stripButtons) ?? d.stripButtons
         compactAddressBar = try c.decodeIfPresent(Bool.self, forKey: .compactAddressBar) ?? d.compactAddressBar
         addressAlignment = try c.decodeIfPresent(String.self, forKey: .addressAlignment) ?? d.addressAlignment
         chromeStyle = try c.decodeIfPresent(String.self, forKey: .chromeStyle) ?? d.chromeStyle
         navPlacement = try c.decodeIfPresent(String.self, forKey: .navPlacement) ?? d.navPlacement
+        // Migration: a single `stripButtons` from before the two-cluster split
+        // (a retired key, decoded from a side container) lands on whichever
+        // side its old nav placement chose.
+        let legacy = try? decoder.container(keyedBy: LegacyKeys.self)
+        if let leading = try c.decodeIfPresent([String].self, forKey: .stripLeadingButtons) {
+            stripLeadingButtons = leading
+            stripTrailingButtons = try c.decodeIfPresent([String].self, forKey: .stripTrailingButtons) ?? d.stripTrailingButtons
+        } else if let old = try legacy?.decodeIfPresent([String].self, forKey: .stripButtons) {
+            if navPlacement == "right" { stripTrailingButtons = old; stripLeadingButtons = [] }
+            else { stripLeadingButtons = old; stripTrailingButtons = [] }
+        } else {
+            stripLeadingButtons = d.stripLeadingButtons
+            stripTrailingButtons = d.stripTrailingButtons
+        }
         startPageGreeting = try c.decodeIfPresent(String.self, forKey: .startPageGreeting) ?? d.startPageGreeting
         startPageShowFavorites = try c.decodeIfPresent(Bool.self, forKey: .startPageShowFavorites) ?? d.startPageShowFavorites
         startPageShowRecents = try c.decodeIfPresent(Bool.self, forKey: .startPageShowRecents) ?? d.startPageShowRecents
@@ -108,6 +137,9 @@ struct Appearance: Codable, Equatable {
         windowOpacity = try c.decodeIfPresent(Double.self, forKey: .windowOpacity) ?? d.windowOpacity
         blur = try c.decodeIfPresent(Double.self, forKey: .blur) ?? d.blur
         grain = try c.decodeIfPresent(Double.self, forKey: .grain) ?? d.grain
+        liquidGlass = try c.decodeIfPresent(Bool.self, forKey: .liquidGlass) ?? d.liquidGlass
+        glassTinted = try c.decodeIfPresent(Bool.self, forKey: .glassTinted) ?? d.glassTinted
+        glassInteractive = try c.decodeIfPresent(Bool.self, forKey: .glassInteractive) ?? d.glassInteractive
         appIconBackground = try c.decodeIfPresent(String.self, forKey: .appIconBackground) ?? d.appIconBackground
         appIconGlyph = try c.decodeIfPresent(String.self, forKey: .appIconGlyph) ?? d.appIconGlyph
     }
@@ -156,28 +188,62 @@ final class AppearanceStore: ObservableObject {
 
     // MARK: Control placement (wiggle mode)
 
-    /// The corner kit's list: everything enabled that isn't worn by the strip.
-    /// The sidebar toggle keeps its fixed home by the lights and is never here.
+    /// The three shelves a control can live on: two clusters in the strip
+    /// (either side of the address) and the corner kit. The sidebar toggle
+    /// keeps its own fixed home and is never on any of them.
+    enum ControlSlot: CaseIterable { case leading, trailing, corner }
+
+    var stripLeadingCommands: [Command] {
+        appearance.stripLeadingButtons.compactMap(Command.init(rawValue:))
+    }
+    var stripTrailingCommands: [Command] {
+        appearance.stripTrailingButtons.compactMap(Command.init(rawValue:))
+    }
+    /// Everything enabled that isn't on a strip cluster (nor the fixed toggle).
     var cornerCommands: [Command] {
         appearance.toolbarButtons
-            .filter { !appearance.stripButtons.contains($0) && $0 != Command.toggleSidebar.rawValue }
+            .filter { !appearance.stripLeadingButtons.contains($0)
+                   && !appearance.stripTrailingButtons.contains($0)
+                   && $0 != Command.toggleSidebar.rawValue }
             .compactMap(Command.init(rawValue:))
     }
-    var stripCommands: [Command] {
-        appearance.stripButtons.compactMap(Command.init(rawValue:))
+
+    /// Which shelf a control currently sits on.
+    func slot(of raw: String) -> ControlSlot {
+        if appearance.stripLeadingButtons.contains(raw) { return .leading }
+        if appearance.stripTrailingButtons.contains(raw) { return .trailing }
+        return .corner
     }
 
-    func moveToStrip(_ raw: String) {
-        appearance.stripButtons.removeAll { $0 == raw }
-        appearance.stripButtons.append(raw)
+    /// Move a control onto a shelf. Corner is "in the toolbar list, on neither
+    /// strip cluster", so it's the absence of the other two.
+    func move(_ raw: String, to slot: ControlSlot) {
+        appearance.stripLeadingButtons.removeAll { $0 == raw }
+        appearance.stripTrailingButtons.removeAll { $0 == raw }
         if !appearance.toolbarButtons.contains(raw) { appearance.toolbarButtons.append(raw) }
+        switch slot {
+        case .leading: appearance.stripLeadingButtons.append(raw)
+        case .trailing: appearance.stripTrailingButtons.append(raw)
+        case .corner: break
+        }
     }
-    func moveToCorner(_ raw: String) {
-        appearance.stripButtons.removeAll { $0 == raw }
-        if !appearance.toolbarButtons.contains(raw) { appearance.toolbarButtons.append(raw) }
+
+    /// Click-to-move cycles a wiggling button through the shelves, so a drag
+    /// isn't the only way (the strip sits in the titlebar region, where drags
+    /// are flaky). leading → trailing → corner → leading.
+    func cycleSlot(_ raw: String) {
+        let next: ControlSlot
+        switch slot(of: raw) {
+        case .leading: next = .trailing
+        case .trailing: next = .corner
+        case .corner: next = .leading
+        }
+        move(raw, to: next)
     }
+
     func disableControl(_ raw: String) {
-        appearance.stripButtons.removeAll { $0 == raw }
+        appearance.stripLeadingButtons.removeAll { $0 == raw }
+        appearance.stripTrailingButtons.removeAll { $0 == raw }
         appearance.toolbarButtons.removeAll { $0 == raw }
     }
 
@@ -249,6 +315,11 @@ final class AppearanceStore: ObservableObject {
     var sidebarSecondary: Color { secondaryText(on: sidebarBG) }
     var chromeText: Color { text(on: chrome) }
     var contentText: Color { text(on: windowBG) }
+    /// Ink for text sitting on a full-accent fill (selection highlights). The
+    /// accent isn't always dark — a light accent needs black text — so this is
+    /// contrast-picked, never a hardcoded white.
+    var accentText: Color { text(on: accent) }
+    var accentSecondaryText: Color { secondaryText(on: accent) }
 
     var uiFont: Font {
         appearance.fontName == "system"
@@ -319,12 +390,17 @@ private struct RuneSurface: ViewModifier {
     @EnvironmentObject var appearance: AppearanceStore
 
     func body(content: Content) -> some View {
-        content
-            .background(.regularMaterial,
-                        in: RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .strokeBorder(appearance.hairline))
-            .shadow(color: .black.opacity(0.18), radius: 16, y: 7)
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        if #available(macOS 26, *), appearance.appearance.liquidGlass {
+            // Real Liquid Glass carries its own shadow, highlight and edge —
+            // no hand-rolled hairline or drop shadow over the top.
+            content.glassEffect(appearance.glass(interactive: true), in: shape)
+        } else {
+            content
+                .background(.regularMaterial, in: shape)
+                .overlay(shape.strokeBorder(appearance.hairline))
+                .shadow(color: .black.opacity(0.18), radius: 16, y: 7)
+        }
     }
 }
 
@@ -332,6 +408,40 @@ extension View {
     /// Wear the shared overlay surface at the given radius role.
     func runeSurface(_ appearance: AppearanceStore, _ role: AppearanceStore.RadiusRole = .large) -> some View {
         modifier(RuneSurface(radius: appearance.radius(role)))
+    }
+
+    /// Wear the overlay surface in an arbitrary shape (the corner kit's docked
+    /// tab, the suggestion drop). Same glass-or-material choice as runeSurface.
+    func runeSurface(_ appearance: AppearanceStore, in shape: some InsettableShape) -> some View {
+        modifier(RuneSurfaceShape(shape: shape))
+    }
+}
+
+private struct RuneSurfaceShape<S: InsettableShape>: ViewModifier {
+    let shape: S
+    @EnvironmentObject var appearance: AppearanceStore
+
+    func body(content: Content) -> some View {
+        if #available(macOS 26, *), appearance.appearance.liquidGlass {
+            content.glassEffect(appearance.glass(interactive: false), in: shape)
+        } else {
+            content
+                .background(.regularMaterial, in: shape)
+                .overlay(shape.strokeBorder(appearance.hairline))
+                .shadow(color: .black.opacity(0.18), radius: 12, y: 6)
+        }
+    }
+}
+
+@available(macOS 26, *)
+extension AppearanceStore {
+    /// The app's one glass recipe, so every surface refracts alike: tinted
+    /// with the accent when asked, interactive where the shape invites a press.
+    func glass(interactive: Bool) -> Glass {
+        var g = Glass.regular
+        if appearance.glassTinted { g = g.tint(accent.opacity(0.5)) }
+        if interactive && appearance.glassInteractive { g = g.interactive() }
+        return g
     }
 }
 

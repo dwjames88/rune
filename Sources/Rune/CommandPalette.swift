@@ -170,13 +170,14 @@ private struct PaletteRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: icon).frame(width: 20).foregroundStyle(selected ? .white : .secondary)
+            Image(systemName: icon).frame(width: 20)
+                .foregroundStyle(selected ? AnyShapeStyle(appearance.accentSecondaryText) : AnyShapeStyle(.secondary))
             VStack(alignment: .leading, spacing: 1) {
-                Text(title).foregroundStyle(selected ? .white : .primary).lineLimit(1)
-                if let subtitle { Text(subtitle).font(.caption).foregroundStyle(selected ? .white.opacity(0.8) : .secondary).lineLimit(1) }
+                Text(title).foregroundStyle(selected ? AnyShapeStyle(appearance.accentText) : AnyShapeStyle(.primary)).lineLimit(1)
+                if let subtitle { Text(subtitle).font(.caption).foregroundStyle(selected ? AnyShapeStyle(appearance.accentSecondaryText) : AnyShapeStyle(.secondary)).lineLimit(1) }
             }
             Spacer()
-            if let trailing { Text(trailing).font(.callout).foregroundStyle(selected ? .white.opacity(0.9) : .secondary) }
+            if let trailing { Text(trailing).font(.callout).foregroundStyle(selected ? AnyShapeStyle(appearance.accentSecondaryText) : AnyShapeStyle(.secondary)) }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(selected ? appearance.accent : .clear))

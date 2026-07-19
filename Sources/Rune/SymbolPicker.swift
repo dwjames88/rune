@@ -30,7 +30,9 @@ struct SymbolPicker: View {
                             Image(systemName: name)
                                 .font(.system(size: 14))
                                 .frame(width: 28, height: 28)
-                                .foregroundStyle(name == symbol ? .white : tint)
+                                // Contrast-picked on the tint fill: a light
+                                // folder colour needs black, not white.
+                                .foregroundStyle(name == symbol ? (tint.prefersLightText ? .white : .black) : tint)
                                 .background(RoundedRectangle(cornerRadius: 6)
                                     .fill(name == symbol ? tint : Color.primary.opacity(0.06)))
                         }

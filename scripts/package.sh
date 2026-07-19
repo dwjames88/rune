@@ -20,7 +20,7 @@ cp "$BIN" "$APP/Contents/MacOS/Rune"
 strip -rSTx "$APP/Contents/MacOS/Rune"
 
 # App icon: Icon Composer bundle via actool (Assets.car + legacy icns).
-ICON_COMPOSER="$REPO_ROOT/Assets/Rune.icon"
+ICON_COMPOSER="$REPO_ROOT/Assets/Main Icon/Rune.icon"
 ICON_TMP="$(mktemp -d)"
 if [ -d "$ICON_COMPOSER" ] && xcrun --find actool >/dev/null 2>&1; then
     xcrun actool \

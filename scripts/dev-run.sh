@@ -21,11 +21,11 @@ if [ "$CONFIG" = "release" ]; then
     strip -rSTx "$APP/Contents/MacOS/Rune"
 fi
 
-# App icon. Preferred path: compile the Icon Composer bundle (Assets/Rune.icon)
-# with actool — produces Assets.car (the real layered icon on macOS 26+) plus a
-# legacy Rune.icns. Falls back to sips/iconutil from the 1024px PNG when the
-# Xcode tools aren't available. Cached in .build until the source changes.
-ICON_COMPOSER="$REPO_ROOT/Assets/Rune.icon"
+# App icon. Preferred path: compile the Icon Composer bundle with actool —
+# produces Assets.car (the real layered icon on macOS 26+) plus a legacy
+# Rune.icns. Falls back to sips/iconutil from the 1024px PNG when the Xcode
+# tools aren't available. Cached in .build until the source changes.
+ICON_COMPOSER="$REPO_ROOT/Assets/Main Icon/Rune.icon"
 ICON_SRC="$REPO_ROOT/Assets/Rune-iOS-Default-1024@1x.png"
 ICON_CACHE="$REPO_ROOT/.build/icon"
 if [ -d "$ICON_COMPOSER" ] && xcrun --find actool >/dev/null 2>&1; then
