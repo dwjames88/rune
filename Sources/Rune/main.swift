@@ -300,7 +300,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-    private var appliedIconTokens: (String, String)?
+    private var appliedIconChoice: String?
 
     @objc private func frontBrowserWindow() {
         window?.makeKeyAndOrderFront(nil)
@@ -310,13 +310,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         for browser in browsers {
             TitlebarRemover.strip(browser.window)
         }
-        // Custom app icon (nil = back to the bundle's Icon Composer icon).
-        // Rendering is 1024px — only redo it when the icon tokens changed, not
-        // on every appearance tweak.
-        let tokens = (appearance.appearance.appIconBackground, appearance.appearance.appIconGlyph)
-        if appliedIconTokens == nil || appliedIconTokens! != tokens {
-            appliedIconTokens = tokens
-            NSApp.applicationIconImage = AppIconRenderer.custom(for: appearance.appearance)
+        // App icon (nil = the bundle's own icon, which the system adapts).
+        // Only redo it when the choice changed, not on every appearance tweak.
+        let choice = appearance.appearance.appIconName
+        if appliedIconChoice != choice {
+            appliedIconChoice = choice
+            NSApp.applicationIconImage = appearance.appIcon()
         }
     }
 
