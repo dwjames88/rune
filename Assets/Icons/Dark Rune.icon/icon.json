@@ -1,0 +1,20 @@
+{
+  "fill" : "automatic",
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "image-name" : "DarkRune.png",
+          "name" : "Dark Rune"
+        }
+      ],
+      "name" : "Group"
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}
