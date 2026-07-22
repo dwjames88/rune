@@ -11,16 +11,22 @@ final class SettingsWindowController {
     let appearance: AppearanceStore
     let ai: AIService
     let sites: SiteSettings
+    let updater: Updater
     /// Resolved lazily: the browser model is built after this controller.
     let model: () -> BrowserModel
+    /// Set before `show()` to open on a particular section.
+    private var pendingTab: RuneSettingsView.Tab?
 
     init(settings: SettingsStore, shortcuts: ShortcutStore, history: HistoryStore,
          appearance: AppearanceStore, ai: AIService, sites: SiteSettings,
-         model: @escaping () -> BrowserModel) {
+         updater: Updater, model: @escaping () -> BrowserModel) {
         self.settings = settings; self.shortcuts = shortcuts; self.history = history
         self.appearance = appearance; self.ai = ai
-        self.sites = sites; self.model = model
+        self.sites = sites; self.updater = updater; self.model = model
     }
+
+    /// Open Settings on a specific tab (used by "Check for Updates…").
+    func show(tab: RuneSettingsView.Tab) { pendingTab = tab; show() }
 
     func show() {
         if window == nil {
@@ -33,26 +39,34 @@ final class SettingsWindowController {
             w.center(); w.setFrameAutosaveName("RuneSettings"); w.isReleasedWhenClosed = false
             w.contentViewController = NSHostingController(rootView: RuneSettingsView(
                 settings: settings, shortcuts: shortcuts, history: history,
-                appearance: appearance, ai: ai, sites: sites, model: model))
+                appearance: appearance, ai: ai, sites: sites, updater: updater,
+                model: model, initialTab: pendingTab))
             window = w
+        } else if let t = pendingTab, let host = window?.contentViewController as? NSHostingController<RuneSettingsView> {
+            host.rootView.jumpTo = t
         }
+        pendingTab = nil
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 }
 
-private struct RuneSettingsView: View {
+struct RuneSettingsView: View {
     @ObservedObject var settings: SettingsStore
     @ObservedObject var shortcuts: ShortcutStore
     @ObservedObject var history: HistoryStore
     @ObservedObject var appearance: AppearanceStore
     @ObservedObject var ai: AIService
     @ObservedObject var sites: SiteSettings
+    @ObservedObject var updater: Updater
     let model: () -> BrowserModel
+    var initialTab: Tab? = nil
+    /// A window that's already open jumps here when set (see `show(tab:)`).
+    var jumpTo: Tab? = nil
 
     enum Tab: String, CaseIterable, Identifiable {
         case appearance = "Appearance", presets = "Presets", spaces = "Spaces",
-             browsing = "Browsing", ai = "AI", shortcuts = "Shortcuts"
+             browsing = "Browsing", ai = "AI", shortcuts = "Shortcuts", updates = "Updates"
         var id: String { rawValue }
 
         /// The System Settings vocabulary: a white glyph on a tinted chip.
@@ -64,6 +78,7 @@ private struct RuneSettingsView: View {
             case .browsing: "globe"
             case .ai: "sparkles"
             case .shortcuts: "keyboard.fill"
+            case .updates: "arrow.triangle.2.circlepath"
             }
         }
         var chip: Color {
@@ -74,6 +89,7 @@ private struct RuneSettingsView: View {
             case .browsing: .green
             case .ai: .pink
             case .shortcuts: .gray
+            case .updates: .teal
             }
         }
     }
@@ -101,11 +117,14 @@ private struct RuneSettingsView: View {
                                              sites: sites, model: model)
                 case .ai: AIPane(ai: ai, settings: settings)
                 case .shortcuts: ShortcutsPane(shortcuts: shortcuts)
+                case .updates: UpdatesPane(updater: updater)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(minWidth: 740, minHeight: 560)
+        .onAppear { if let t = initialTab { tab = t } }
+        .onChange(of: jumpTo) { if let t = jumpTo { tab = t } }
     }
 
     private func row(_ t: Tab) -> some View {
@@ -242,10 +261,19 @@ private struct AppearancePane: View {
                     }
                     .padding(.vertical, 2)
                 }
+                HStack {
+                    Text("Light, Dark, or Tinted")
+                    Spacer()
+                    Button("Open Appearance Settings…") {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.Appearance-Settings.extension") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                }
             } header: {
                 Text("App Icon")
             } footer: {
-                Text("Sets the Dock icon while Rune runs. Drop Icon Composer (.icon) files into Assets/Icons to offer more here. Each icon adapts to your system's light, dark or tinted appearance automatically (macOS 26+, System Settings → Appearance).")
+                Text("Sets the Dock icon while Rune runs. Drop Icon Composer (.icon) files into Assets/Icons to offer more here. Each icon adapts automatically to the light, dark or tinted style you choose in System Settings → Appearance → \u{201C}Icon & widget style\u{201D} (macOS 26+) — that's a system-wide setting Apple doesn't let an app override for itself.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Window") {
@@ -280,6 +308,80 @@ private struct AppearancePane: View {
             Text("\(Int(value.wrappedValue)) \(suffix)").monospacedDigit().foregroundStyle(.secondary)
                 .frame(width: 58, alignment: .trailing)
         }
+    }
+}
+
+/// Where updates live: the running version, a manual check, and — when GitHub
+/// has something newer — the release notes and a button out to the download.
+private struct UpdatesPane: View {
+    @ObservedObject var updater: Updater
+
+    private var checking: Bool { if case .checking = updater.status { true } else { false } }
+
+    var body: some View {
+        Form {
+            Section {
+                LabeledContent("This build", value: "Rune \(updater.current)")
+                switch updater.status {
+                case .idle:
+                    EmptyView()
+                case .checking:
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Checking…").foregroundStyle(.secondary)
+                    }
+                case .upToDate:
+                    Label("You're up to date.", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                case .failed(let why):
+                    Label(why, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                case .available(let release):
+                    Label("Rune \(release.version) is available.", systemImage: "sparkles")
+                        .foregroundStyle(.primary)
+                }
+            } header: {
+                Text("Version")
+            } footer: {
+                if let last = updater.lastChecked {
+                    Text("Last checked \(last.formatted(date: .abbreviated, time: .shortened)).")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
+            if case .available(let release) = updater.status {
+                Section(release.name) {
+                    if !release.notes.isEmpty {
+                        ScrollView {
+                            Text(release.notes)
+                                .font(.callout)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
+                        }
+                        .frame(maxHeight: 220)
+                    }
+                    Button {
+                        NSWorkspace.shared.open(release.url)
+                    } label: {
+                        Label("Download Rune \(release.version)…", systemImage: "arrow.down.circle")
+                    }
+                }
+            }
+
+            Section {
+                Toggle("Check for updates automatically", isOn: $updater.autoCheck)
+                Button {
+                    Task { await updater.check(userInitiated: true) }
+                } label: {
+                    Text(checking ? "Checking…" : "Check Now")
+                }
+                .disabled(checking)
+            } footer: {
+                Text("Rune checks GitHub for a newer release — at most once a day on launch — and never installs anything on its own; you download and replace it yourself.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
     }
 }
 

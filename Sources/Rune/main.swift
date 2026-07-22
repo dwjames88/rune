@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let finder = FinderStore()
     let downloads = DownloadStore()
     let sites = SiteSettings()
+    let updater = Updater()
     lazy var blocker = ContentBlocker(settings: settings, sites: sites)
     lazy var ai = AIService(claude: claude, settings: settings)
     lazy var model = BrowserModel(settings: settings, history: history, shortcuts: shortcuts,
@@ -24,7 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                                   sites: sites, blocker: blocker, appearance: appearance)
     lazy var settingsWindow = SettingsWindowController(
         settings: settings, shortcuts: shortcuts, history: history, appearance: appearance,
-        ai: ai, sites: sites, model: { [unowned self] in self.model })
+        ai: ai, sites: sites, updater: updater, model: { [unowned self] in self.model })
     lazy var finderWindow = FinderWindowController(model: model, appearance: appearance)
     private var window: NSWindow?
 
@@ -100,6 +101,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // The first minute of a public build: offer default-browser once,
         // after the window has had a moment to be a browser.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { self.offerDefaultBrowser() }
+
+        // A quiet look for a newer release, at most once a day.
+        if updater.autoCheck { Task { await updater.checkIfDue() } }
+    }
+
+    @objc private func checkForUpdates() {
+        settingsWindow.show(tab: .updates)
+        Task { await updater.check(userInitiated: true) }
     }
 
     /// Asked exactly once, ever — and never when Rune already is the default.
@@ -328,6 +337,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         appMenu.addItem(withTitle: "About Rune",
                         action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
                         keyEquivalent: "")
+        let updateItem = NSMenuItem(title: "Check for Updates…",
+                                    action: #selector(checkForUpdates), keyEquivalent: "")
+        updateItem.target = self
+        appMenu.addItem(updateItem)
         appMenu.addItem(.separator())
         addCommandItem(.openSettings, to: appMenu)
         appMenu.addItem(.separator())
