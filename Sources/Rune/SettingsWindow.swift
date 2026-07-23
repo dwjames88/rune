@@ -239,6 +239,17 @@ private struct AppearancePane: View {
                 Text("Checked commands are placed on one of three shelves: a cluster on either side of the address, or behind the grab tab at the page's bottom right. View → Customize Controls starts wiggle mode, where you drag a button between them (or click it to cycle) — back, forward and reload included. The sidebar toggle keeps its home by the traffic lights. Classic chrome shows everything as one toolbar instead.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section {
+                Picker("Style", selection: a.zenStyle) {
+                    Text("Full — nothing but the page").tag("full")
+                    Text("Subtle — a quiet address band").tag("subtle")
+                }
+            } header: {
+                Text("Zen Mode")
+            } footer: {
+                Text("Zen Mode (View → Zen Mode, ⌃⌘Z) clears the window down to the page and hides the sidebar. Full leaves nothing but the content — nudge the top edge for the strip, the side edge for the sidebar. Subtle keeps a faint address band that blooms to the full strip on hover. Either way, everything returns the moment your pointer finds its edge.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Start Page") {
                 TextField("Greeting", text: a.startPageGreeting, prompt: Text("Rune"))
                 Toggle("Show favorites", isOn: a.startPageShowFavorites)

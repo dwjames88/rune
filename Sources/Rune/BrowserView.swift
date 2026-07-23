@@ -15,15 +15,25 @@ struct BrowserView: View {
     var body: some View {
         ZStack(alignment: .top) {
             HStack(spacing: 0) {
-                if model.sidebarVisible && !appearance.appearance.sidebarOnRight { sidebar; Divider() }
+                if model.sidebarVisible && !model.zenActive && !appearance.appearance.sidebarOnRight { sidebar; Divider() }
                 ContentArea(model: model, dispatch: dispatch)
-                if model.sidebarVisible && appearance.appearance.sidebarOnRight { Divider(); sidebar }
+                if model.sidebarVisible && !model.zenActive && appearance.appearance.sidebarOnRight { Divider(); sidebar }
             }
             .animation(.easeInOut(duration: 0.18), value: model.sidebarVisible)
+            .animation(Motion.arrive, value: model.zenActive)
             .background(appearance.windowBG.opacity(appearance.containerOpacity))
             // Fading the frost reveals the sharp glass beneath it — that's
             // the whole blur dial.
             .background(WindowBlur().opacity(appearance.appearance.blur / 100))
+            // Zen: the sidebar steps out of the layout and waits at the window's
+            // edge, sliding back in over the page when the pointer finds it.
+            .overlay(alignment: appearance.appearance.sidebarOnRight ? .trailing : .leading) {
+                if model.zenActive {
+                    ZenSidebarReveal(onRight: appearance.appearance.sidebarOnRight) {
+                        Sidebar(model: model, dispatch: dispatch)
+                    }
+                }
+            }
 
             if showAsk {
                 AskBar(model: model, ai: model.ai, isPresented: $showAsk)
@@ -939,8 +949,17 @@ private struct ContentArea: View {
         VStack(spacing: 0) {
             // In a floating split the strip stands down — each pane carries
             // its own chrome, Arc-style, and a third bar would speak for
-            // nobody.
-            if floatingChrome && !model.isSplit {
+            // nobody. In zen the strip leaves the layout entirely; the overlay
+            // below reveals it on a top-edge hover.
+            if model.zenActive {
+                // Subtle zen keeps a slim band in the layout: it pushes the page
+                // down and wears the site's own top colour, so it reads as the
+                // page carried up rather than a bar laid over it. Full zen keeps
+                // nothing here — its strip is purely the top-edge reveal.
+                if appearance.appearance.zenStyle == "subtle" {
+                    ZenSubtleBand(hint: zenHint, tint: tint)
+                }
+            } else if floatingChrome && !model.isSplit {
                 MinimalChrome(model: model, dispatch: dispatch, address: $address,
                               addressFocused: $addressFocused, highlighted: $highlighted,
                               suggestionCount: suggestions.count, editing: $controlEdit,
@@ -1000,6 +1019,11 @@ private struct ContentArea: View {
                                    surface: floatingChrome ? tint.map(Color.init(nsColor:)) : nil) { index in
                         highlighted = index; activate()
                     }
+                    // In zen the chrome floats over the page, so the dropdown
+                    // has to start below the revealed strip, not behind it. Full
+                    // zen bleeds to the top edge; subtle zen already sits below
+                    // its in-flow band, so it needs only the strip's overhang.
+                    .padding(.top, model.zenActive ? (appearance.appearance.zenStyle == "subtle" ? 12 : 38) : 0)
                 }
                 if let toast {
                     Text(toast)
@@ -1029,6 +1053,21 @@ private struct ContentArea: View {
                 WebContainer(webView: panel.webView).id(panel.id)
                     .frame(width: 340)
             }
+            }
+        }
+        // Zen: the strip waits just above the page. In "full" it's an invisible
+        // lip you brush; in "subtle" it's a quiet band that names the page and
+        // blooms to the whole strip on hover (or whenever the address is being
+        // typed into).
+        .overlay(alignment: .top) {
+            if model.zenActive {
+                ZenChromeReveal(collapsedHeight: appearance.appearance.zenStyle == "subtle" ? 26 : 8,
+                                keepOpen: addressFocused) {
+                    MinimalChrome(model: model, dispatch: dispatch, address: $address,
+                                  addressFocused: $addressFocused, highlighted: $highlighted,
+                                  suggestionCount: suggestions.count, editing: $controlEdit,
+                                  activate: activate)
+                }
             }
         }
         .animation(.easeOut(duration: 0.18), value: toast)
@@ -1073,6 +1112,13 @@ private struct ContentArea: View {
     }
 
     private func sync() { address = model.activeTab?.urlString ?? "" }
+
+    /// The quiet label the subtle zen band wears: the current host, or the
+    /// wordmark on an empty page.
+    private var zenHint: String {
+        guard let host = URL(string: address)?.host else { return address }
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
 
     private var activeURLPublisher: AnyPublisher<String, Never> {
         model.activeTab?.$urlString.eraseToAnyPublisher() ?? Just("").eraseToAnyPublisher()
@@ -2227,7 +2273,7 @@ private struct MinimalChrome: View {
     /// strip carries them so the window keeps its verbs.
     private var stripCarriesLights: Bool {
         !appearance.appearance.hideTrafficLights
-            && (!model.sidebarVisible || appearance.appearance.sidebarOnRight)
+            && (model.zenActive || !model.sidebarVisible || appearance.appearance.sidebarOnRight)
     }
 
     private var themePublisher: AnyPublisher<NSColor?, Never> {
@@ -2269,8 +2315,9 @@ private struct MinimalChrome: View {
     var body: some View {
         HStack(spacing: 10) {
             if stripCarriesLights { TrafficLights() }
-            // The way back: with the sidebar away, its toggle moves up here.
-            if !model.sidebarVisible {
+            // The way back: with the sidebar away, its toggle moves up here. In
+            // zen the sidebar answers to an edge hover instead, so no toggle.
+            if !model.zenActive && !model.sidebarVisible {
                 CommandButton(model: model, command: .toggleSidebar, dispatch: dispatch,
                               surface: surface)
             }
@@ -2307,6 +2354,92 @@ private struct MinimalChrome: View {
         .onReceive(themePublisher) { tint = $0 }
         .onChange(of: model.selection) { tint = model.activeTab?.themeColor }
         .onChange(of: model.focusedPane) { tint = model.activeTab?.themeColor }
+    }
+}
+
+// MARK: - Zen reveals
+
+/// The sidebar, in zen: a thin lip hugging the window edge at rest, blooming
+/// to the full sidebar (over the page, not beside it) while the pointer is on
+/// it. One hover region for both states, so the pointer never falls out of the
+/// zone as the panel grows — no flicker.
+private struct ZenSidebarReveal<Content: View>: View {
+    let onRight: Bool
+    @ViewBuilder var content: () -> Content
+    @EnvironmentObject var appearance: AppearanceStore
+    @State private var revealed = false
+
+    var body: some View {
+        ZStack(alignment: onRight ? .topTrailing : .topLeading) {
+            if revealed {
+                content()
+                    .frame(width: appearance.sidebarWidth)
+                    .frame(maxHeight: .infinity)
+                    .overlay(alignment: onRight ? .leading : .trailing) { SidebarResizeHandle() }
+                    .shadow(color: .black.opacity(0.28), radius: 22, x: onRight ? -10 : 10)
+                    .transition(.move(edge: onRight ? .trailing : .leading))
+            } else {
+                // The invisible edge you brush to call it back.
+                Color.clear.frame(width: 8)
+                    .frame(maxHeight: .infinity)
+                    .contentShape(Rectangle())
+            }
+        }
+        .frame(width: revealed ? appearance.sidebarWidth : 8,
+               alignment: onRight ? .trailing : .leading)
+        .frame(maxHeight: .infinity)
+        .onHover { hovering in withAnimation(Motion.arrive) { revealed = hovering } }
+    }
+}
+
+/// The strip, in zen: an invisible hover lip at rest that blooms to the whole
+/// chrome on hover (or whenever the address is being typed into). In full zen
+/// the lip is a thin 8pt edge; in subtle zen it's the height of the in-flow
+/// band below, so the reveal sits exactly over it. One growing hover region, so
+/// the pointer never falls out of the zone as the strip blooms.
+private struct ZenChromeReveal<Full: View>: View {
+    let collapsedHeight: CGFloat
+    let keepOpen: Bool
+    @ViewBuilder var full: () -> Full
+    @State private var hover = false
+    private var open: Bool { hover || keepOpen }
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            if open {
+                full().transition(.move(edge: .top).combined(with: .opacity))
+            } else {
+                Color.clear.frame(height: collapsedHeight).contentShape(Rectangle())
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .top)
+        .onHover { hovering in withAnimation(Motion.arrive) { hover = hovering } }
+    }
+}
+
+/// The subtle band: a hair-high echo of the address that stays in the layout
+/// (pushing the page down) and wears the site's own top colour, so it reads as
+/// the page carried up rather than a bar laid over it. Hovering the strip above
+/// hands you back the whole chrome.
+private struct ZenSubtleBand: View {
+    let hint: String
+    /// The site's own top colour — its declared theme-color, or the header
+    /// Rune sampled when none was declared.
+    let tint: NSColor?
+    @EnvironmentObject var appearance: AppearanceStore
+
+    private var surface: Color { tint.map(Color.init(nsColor:)) ?? appearance.chrome }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "magnifyingglass").font(.system(size: 9, weight: .semibold))
+            Text(hint.isEmpty ? "Rune" : hint).font(appearance.font(11)).lineLimit(1)
+        }
+        .foregroundStyle(appearance.secondaryText(on: surface))
+        .frame(maxWidth: .infinity)
+        .frame(height: 26)
+        .background(surface.opacity(appearance.containerOpacity))
+        .animation(Motion.update, value: tint)
     }
 }
 
