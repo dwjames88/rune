@@ -326,6 +326,10 @@ final class BrowserModel: ObservableObject {
     /// isn't in the undo stack, and switching spaces swaps it like the shelf.
     @Published var panel: Tab?
     @Published var sidebarVisible = true
+    /// Zen mode: the chrome and sidebar step out of the way (fully or to a
+    /// subtle band, per `zenStyle`) and return on an edge hover. A per-window
+    /// runtime state, not a saved setting — like `sidebarVisible`.
+    @Published var zenActive = false
     /// Batch-collect candidates; non-nil presents the collect sheet.
     @Published var collectCandidates: [CollectCandidate]?
 

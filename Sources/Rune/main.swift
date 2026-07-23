@@ -32,6 +32,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Every browser window and the model behind it — the main one, plus any
     /// private windows. Stays small, so a linear lookup is the right tool.
     private var browsers: [(window: NSWindow, model: BrowserModel)] = []
+    /// The local key-down monitor that lets Rune's shortcuts beat the page.
+    private var keyMonitor: Any?
 
     /// Glances and segments. They hold themselves open (isReleasedWhenClosed is
     /// off) and drop out of here when their window goes.
@@ -47,8 +49,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return model
     }
 
+    /// Rune's shortcuts have to win over the page. A focused WKWebView answers
+    /// `performKeyEquivalent:` before the main menu, and swallows some chords
+    /// outright — ⌘K the most visible — so the menu item never fires. This local
+    /// monitor runs ahead of that: on a browser window a keystroke bound to a
+    /// command is dispatched and consumed here; everything else — plain typing,
+    /// text-editing chords, the shortcut recorder, the Settings and Finder
+    /// windows — passes straight through to its normal handling.
+    private func installShortcutMonitor() {
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self,
+                  let key = NSApp.keyWindow,
+                  self.browsers.contains(where: { $0.window === key }),
+                  let command = self.command(boundTo: event)
+            else { return event }
+            self.dispatch(command)
+            return nil   // consume, so neither the menu nor the page also acts
+        }
+    }
+
+    /// The command a keystroke is bound to, or nil. A ⌘ or ⌃ chord is required,
+    /// so plain typing and IME composition are never intercepted; standard
+    /// editing chords (⌘C/⌘V/⌘A/⌘Z) aren't Rune commands and fall through.
+    private func command(boundTo event: NSEvent) -> Command? {
+        let mods = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        guard mods.contains(.command) || mods.contains(.control) else { return nil }
+        guard let chars = event.charactersIgnoringModifiers?.lowercased(), chars.count == 1
+        else { return nil }
+        return Command.allCases.first { command in
+            let sc = shortcuts.shortcut(for: command)
+            guard !sc.key.isEmpty else { return false }
+            return sc.key.lowercased() == chars
+                && sc.flags.intersection([.command, .control, .option, .shift]) == mods
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildMenu()
+        installShortcutMonitor()
 
         let window = makeBrowserWindow(for: model)
         // Reopen at the last size/position; first launch gets a generous default.
@@ -417,6 +455,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .goForward: model.goForward()
         case .focusAddress: show(.focusAddressBar)
         case .toggleSidebar: model.sidebarVisible.toggle()
+        case .toggleZen: withAnimation(Motion.arrive) { model.zenActive.toggle() }
         case .togglePiP: model.activeTab?.togglePiP()
         case .findInPage: show(.showFindBar)
         case .undoCloseTab: model.undoCloseTab()

@@ -46,6 +46,12 @@ struct Appearance: Codable, Equatable {
     var chromeStyle = "floating"
     /// Which side of the address bar the back/forward buttons sit on.
     var navPlacement = "left"
+    /// Zen mode's flavor when it's active (toggled per window, not stored).
+    /// "full": the chrome vanishes outright — nudge the top edge to bloom the
+    /// whole strip back. "subtle": a slim, quiet address band stays put and
+    /// blooms to the full strip on hover. The sidebar is hidden and
+    /// edge-revealed in both.
+    var zenStyle = "full"
 
     // Start page
     var startPageGreeting = ""          // empty = the "Rune" wordmark
@@ -86,7 +92,7 @@ struct Appearance: Codable, Equatable {
         case fontName, fontSize, textColor
         case sidebarWidth, cornerRadius, sidebarOnRight
         case toolbarButtons, stripLeadingButtons, stripTrailingButtons
-        case compactAddressBar, addressAlignment, chromeStyle, navPlacement
+        case compactAddressBar, addressAlignment, chromeStyle, navPlacement, zenStyle
         case startPageGreeting, startPageShowFavorites, startPageShowRecents, startPageBackground
         case hideTrafficLights, windowOpacity, blur, grain
         case liquidGlass, glassTinted, glassInteractive
@@ -116,6 +122,7 @@ struct Appearance: Codable, Equatable {
         addressAlignment = try c.decodeIfPresent(String.self, forKey: .addressAlignment) ?? d.addressAlignment
         chromeStyle = try c.decodeIfPresent(String.self, forKey: .chromeStyle) ?? d.chromeStyle
         navPlacement = try c.decodeIfPresent(String.self, forKey: .navPlacement) ?? d.navPlacement
+        zenStyle = try c.decodeIfPresent(String.self, forKey: .zenStyle) ?? d.zenStyle
         // Migration: a single `stripButtons` from before the two-cluster split
         // (a retired key, decoded from a side container) lands on whichever
         // side its old nav placement chose.
