@@ -134,9 +134,15 @@ needs a **paid** Developer Program membership — the same thing notarization wa
 
 ## 6. Gotchas that will waste your time
 
-- **⌘K never reaches Rune from synthetic input on this machine** — verified with an event
-  monitor: ⌘J arrives, ⌘K doesn't. Real key presses are fine (the owner remapped it and
-  confirmed it works). Verify the palette via View ▸ Command Palette when automating.
+- **⌘K *and Escape* never reach Rune from synthetic (computer-use) input on this machine** —
+  re-verified 2026-07-25 with an `NSLog` inside the `dismissOnEscape` monitor: it installs,
+  a typed character logs a keyDown, Escape logs nothing at all. Real key presses are fine.
+  This has twice looked like a real bug (an "unclosable" command palette, a find bar stuck
+  ghosted over the page) and twice been the harness. **Clicking the ✕ closes them — that's
+  the tell.** Verify the palette via View ▸ Command Palette; dismiss overlays by click.
+  Diagnostic when unsure whether a key is broken in-app: launch the binary directly so
+  stderr is capturable (`.build/Rune.app/Contents/MacOS/Rune > /tmp/rune.log 2>&1 &`), add a
+  temporary NSLog in a local keyDown monitor, and see whether the event arrives at all.
 - **`open` (and `dev-run.sh`) reuses a running instance** — you'll be looking at the old
   build. Quit first: `osascript -e 'quit app "Rune"'`.
 - **computer-use: request access by the display name "Rune"** (bundle id also works).
