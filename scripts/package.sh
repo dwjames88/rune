@@ -68,44 +68,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
         <key>UTTypeTagSpecification</key><dict/>
       </dict>
       <dict>
-        <key>UTTypeIdentifier</key><string>com.dwjames.Rune.finderItem</string>
-        <key>UTTypeDescription</key><string>Rune Finder Item</string>
-        <key>UTTypeConformsTo</key><array><string>public.data</string></array>
-        <key>UTTypeTagSpecification</key><dict/>
-      </dict>
-      <dict>
         <key>UTTypeIdentifier</key><string>com.dwjames.Rune.control</string>
         <key>UTTypeDescription</key><string>Rune Control Button</string>
         <key>UTTypeConformsTo</key><array><string>public.data</string></array>
         <key>UTTypeTagSpecification</key><dict/>
-      </dict>
-    </array>
-    <key>NSServices</key>
-    <array>
-      <dict>
-        <key>NSMenuItem</key><dict><key>default</key><string>Save to Rune</string></dict>
-        <key>NSMessage</key><string>saveToRuneFinder</string>
-        <key>NSPortName</key><string>Rune</string>
-        <key>NSRequiredContext</key>
-        <dict>
-          <key>NSServiceCategory</key><string>public.item</string>
-        </dict>
-        <key>NSSendTypes</key>
-        <array>
-          <string>public.file-url</string>
-        </array>
-      </dict>
-      <dict>
-        <key>NSMenuItem</key><dict><key>default</key><string>Save to Rune</string></dict>
-        <key>NSMessage</key><string>saveToRuneFinderData</string>
-        <key>NSPortName</key><string>Rune</string>
-        <key>NSSendTypes</key>
-        <array>
-          <string>public.url</string>
-          <string>public.png</string>
-          <string>public.tiff</string>
-          <string>NSStringPboardType</string>
-        </array>
       </dict>
     </array>
     <key>CFBundleDocumentTypes</key>

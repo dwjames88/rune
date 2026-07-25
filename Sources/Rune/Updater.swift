@@ -56,8 +56,9 @@ final class Updater: ObservableObject {
         status = .checking
         do {
             let release = try await fetchLatest()
-            lastChecked = Date()
-            UserDefaults.standard.set(lastChecked!.timeIntervalSince1970, forKey: Self.lastCheckKey)
+            let now = Date()
+            lastChecked = now
+            UserDefaults.standard.set(now.timeIntervalSince1970, forKey: Self.lastCheckKey)
             status = isNewer(release.version, than: current) ? .available(release) : .upToDate
         } catch {
             status = .failed((error as? LocalizedError)?.errorDescription ?? "Couldn't check for updates.")

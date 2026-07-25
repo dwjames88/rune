@@ -340,7 +340,6 @@ final class BrowserModel: ObservableObject {
     let shortcuts: ShortcutStore
     /// Rune's AI, whichever model is behind it today.
     let ai: AIService
-    let finder: FinderStore
     let downloads: DownloadStore
     let sites: SiteSettings
     let blocker: ContentBlocker
@@ -368,11 +367,11 @@ final class BrowserModel: ObservableObject {
     }
 
     init(settings: SettingsStore, history: HistoryStore, shortcuts: ShortcutStore,
-         ai: AIService, finder: FinderStore, downloads: DownloadStore,
+         ai: AIService, downloads: DownloadStore,
          sites: SiteSettings, blocker: ContentBlocker, appearance: AppearanceStore,
          isPrivate: Bool = false) {
         self.settings = settings; self.history = history; self.shortcuts = shortcuts
-        self.ai = ai; self.finder = finder; self.downloads = downloads
+        self.ai = ai; self.downloads = downloads
         self.sites = sites; self.blocker = blocker; self.appearance = appearance
         self.isPrivate = isPrivate
 
@@ -818,9 +817,6 @@ final class BrowserModel: ObservableObject {
         let webView = RuneWebView(frame: .zero, configuration: configuration ?? self.configuration)
         webView.navigationDelegate = coordinator
         webView.uiDelegate = coordinator
-        webView.onSaveToFinder = { [weak self, weak webView] url, _ in
-            self?.saveToFinder(assetURL: url, from: webView)
-        }
         webView.onDownload = { [weak self, weak webView] url in
             guard let webView else { return }
             self?.coordinator.startDownload(url, from: webView)
@@ -828,32 +824,36 @@ final class BrowserModel: ObservableObject {
         return webView
     }
 
-    // MARK: Finder capture
+    // MARK: Asset grabs
 
-    /// The one save path every capture flow funnels through: download, toast,
-    /// optional Claude auto-tagging.
-    func saveToFinder(assetURL: URL, from webView: WKWebView?, tags: [String] = [], quiet: Bool = false) {
-        // Saving the same asset twice shouldn't clone it.
-        if finder.items.contains(where: { $0.assetURL == assetURL.absoluteString }) {
-            if !quiet { NotificationCenter.default.post(name: .finderToast, object: "Already in Finder") }
-            return
-        }
-        let source = webView?.url?.absoluteString ?? ""
-        let title = webView?.title ?? ""
+    /// The one save path every grab funnels through: fetch the asset, land it
+    /// in the download folder (or wherever the save panel says), say so.
+    func saveAsset(assetURL: URL, from webView: WKWebView?, quiet: Bool = false) {
         Task { @MainActor in
             do {
-                let item = try await finder.save(assetURL: assetURL, sourceURL: source,
-                                                 sourceTitle: title, tags: tags)
-                if !quiet { NotificationCenter.default.post(name: .finderToast, object: "Saved to Finder") }
-                if settings.finderAutoTag {
-                    let ai = self.ai, finder = self.finder
-                    Task { await finder.autoTag(item, using: ai) }
+                guard let saved = try await AssetSaver.save(remote: assetURL, settings: settings)
+                else { return }   // the user cancelled the panel
+                if !quiet {
+                    NotificationCenter.default.post(name: .finderToast,
+                                                    object: "Saved \(saved.lastPathComponent)")
                 }
             } catch {
                 if !quiet {
                     NotificationCenter.default.post(name: .finderToast,
                                                     object: "Couldn't save — \(error.localizedDescription)")
                 }
+            }
+        }
+    }
+
+    /// The collect sheet's exit: every picked asset straight to the download
+    /// folder — one batch, no per-file panels.
+    func saveAssets(_ urls: [URL]) {
+        NotificationCenter.default.post(name: .finderToast,
+                                        object: "Saving \(urls.count) to \(AssetSaver.directory(settings).lastPathComponent)")
+        Task { @MainActor in
+            for url in urls {
+                _ = try? await AssetSaver.save(remote: url, settings: settings, alwaysToFolder: true)
             }
         }
     }
@@ -871,7 +871,7 @@ final class BrowserModel: ObservableObject {
                 }
                 return
             }
-            Task { @MainActor in self?.saveToFinder(assetURL: url, from: tab?.webView) }
+            Task { @MainActor in self?.saveAsset(assetURL: url, from: tab?.webView) }
         }
     }
 
@@ -900,16 +900,17 @@ final class BrowserModel: ObservableObject {
         }
     }
 
-    /// Capture the visible page as an image item.
+    /// Capture the visible page as a PNG in the download folder.
     func capturePage() {
         guard let tab = activeTab else { return }
         tab.webView.takeSnapshot(with: nil) { [weak self, weak tab] image, _ in
             guard let self, let tab, let image, let png = image.png else { return }
             Task { @MainActor in
-                let name = tab.title.isEmpty ? "Page Capture" : tab.title
-                if (try? await self.finder.save(data: png, ext: "png", fileName: name,
-                                                sourceURL: tab.urlString, sourceTitle: tab.title)) != nil {
-                    NotificationCenter.default.post(name: .finderToast, object: "Captured page to Finder")
+                let name = (tab.title.isEmpty ? "Page Capture" : tab.title) + ".png"
+                if let saved = (try? AssetSaver.save(data: png, suggestedName: name,
+                                                     settings: self.settings)) ?? nil {
+                    NotificationCenter.default.post(name: .finderToast,
+                                                    object: "Saved \(saved.lastPathComponent)")
                 }
             }
         }

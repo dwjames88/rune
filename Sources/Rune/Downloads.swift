@@ -7,14 +7,78 @@ import WebKit
 
 /// Where a finished download ends up. A setting, like everything else.
 enum DownloadLocation: String, Codable, CaseIterable, Identifiable {
-    case downloadsFolder, ask, finderLibrary
+    case downloadsFolder, ask
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .downloadsFolder: "The Downloads folder"
+        case .downloadsFolder: "The download folder"
         case .ask: "Ask where to save each file"
-        case .finderLibrary: "The Rune Finder library"
         }
+    }
+
+    /// Settings saved before v1.16 could carry the retired "finderLibrary"
+    /// case; decode it (or anything else unknown) as the folder default so
+    /// one old value never resets a whole settings file.
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = DownloadLocation(rawValue: raw) ?? .downloadsFolder
+    }
+}
+
+/// One door for every file Rune saves on its own — grabbed images, page
+/// captures, collected batches. Resolves the user's download folder (or
+/// asks, when that's the setting), fetches when the asset is remote, and
+/// never overwrites.
+@MainActor
+enum AssetSaver {
+    /// The folder saves land in: the chosen one, or the system Downloads.
+    static func directory(_ settings: SettingsStore) -> URL {
+        if let path = settings.downloadDirectory, !path.isEmpty {
+            return URL(fileURLWithPath: (path as NSString).expandingTildeInPath, isDirectory: true)
+        }
+        return DownloadStore.downloadsFolder
+    }
+
+    /// Save data under a suggested name. Honors the "ask" setting with a
+    /// save panel; returns nil when the user cancels it. A batch save passes
+    /// `alwaysToFolder` — twenty collected images shouldn't mean twenty
+    /// panels.
+    static func save(data: Data, suggestedName: String, settings: SettingsStore,
+                     alwaysToFolder: Bool = false) throws -> URL? {
+        // A page title is not a path: "Rune / GitHub" must not become a
+        // directory traversal. Slashes and colons are the filesystem's, not
+        // the filename's.
+        let name = suggestedName
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+        let destination: URL?
+        if settings.downloadLocation == .ask, !alwaysToFolder {
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = name
+            panel.directoryURL = directory(settings)
+            destination = panel.runModal() == .OK ? panel.url : nil
+        } else {
+            destination = DownloadStore.uniqueURL(in: directory(settings), filename: name)
+        }
+        guard let destination else { return nil }
+        try data.write(to: destination)
+        return destination
+    }
+
+    /// Fetch a remote asset and save it. The filename comes from the URL,
+    /// with the response's type filling in a missing extension.
+    static func save(remote url: URL, settings: SettingsStore,
+                     alwaysToFolder: Bool = false) async throws -> URL? {
+        let (data, response) = try await URLSession.shared.data(from: url)
+        var name = url.lastPathComponent
+        if name.isEmpty || name == "/" { name = "asset" }
+        if (name as NSString).pathExtension.isEmpty,
+           let ext = response.suggestedFilename.flatMap({ ($0 as NSString).pathExtension }),
+           !ext.isEmpty {
+            name += ".\(ext)"
+        }
+        return try save(data: data, suggestedName: name, settings: settings,
+                        alwaysToFolder: alwaysToFolder)
     }
 }
 
@@ -185,8 +249,8 @@ final class DownloadStore: ObservableObject {
 
 /// Toolbar button: a tray icon that becomes a progress ring while files are in
 /// flight, with a dot when something finished you haven't looked at.
-/// Pressing it opens the Downloads section of the Rune Finder — the list
-/// lives there now, not in an overlay.
+/// Pressing it opens the download folder — Rune saves there and gets out
+/// of the way; this ring is the in-flight progress.
 struct DownloadsButton: View {
     @ObservedObject var downloads: DownloadStore
     /// On glass (the corner kit) it inks with the semantic label colour so it
@@ -222,57 +286,6 @@ struct DownloadsButton: View {
         .help("Downloads (⌥⌘L)")
     }
 }
-
-/// The list, as a Finder pane: ⌥⌘L and the toolbar button land here now,
-/// where a file you kept can be found next to everything else you've kept —
-/// not in an overlay racing you to disappear.
-struct DownloadsList: View {
-    @ObservedObject var downloads: DownloadStore
-    var query = ""
-    /// How to try a failed row again — provided by whoever has a web view.
-    var retry: ((DownloadItem) -> Void)? = nil
-    @EnvironmentObject var appearance: AppearanceStore
-
-    private var rows: [DownloadItem] {
-        let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return downloads.items }
-        return downloads.items.filter { $0.filename.localizedCaseInsensitiveContains(q) }
-    }
-
-    var body: some View {
-        if rows.isEmpty {
-            VStack(spacing: 6) {
-                Spacer()
-                Image(systemName: "arrow.down.circle").font(.system(size: 28))
-                    .foregroundStyle(appearance.secondaryText(on: appearance.windowBG))
-                Text(query.isEmpty ? "Nothing downloaded this session." : "No downloads match.")
-                    .font(appearance.type(.body))
-                    .foregroundStyle(appearance.secondaryText(on: appearance.windowBG))
-                Spacer()
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            ScrollView {
-                VStack(spacing: 0) {
-                    if downloads.items.contains(where: { !$0.isRunning }) {
-                        HStack {
-                            Spacer()
-                            Button("Clear Finished") { downloads.clearFinished() }
-                                .buttonStyle(.plain).font(appearance.font(11))
-                                .foregroundStyle(appearance.accent)
-                        }
-                        .padding(.horizontal, 14).padding(.top, 10)
-                    }
-                    ForEach(rows) { item in
-                        DownloadRow(item: item, retry: retry.map { r in { r(item) } })
-                    }
-                }
-                .padding(.vertical, 4)
-            }
-        }
-    }
-}
-
 /// The quiet word from the corner while bytes land: one card, bottom-left,
 /// naming the file (or counting them) with a live bar. It leaves when the
 /// downloads do — completion's badge lives on the corner kit's grab tab.
@@ -304,61 +317,5 @@ struct DownloadProgressCard: View {
         .padding(.horizontal, 12).padding(.vertical, 9)
         .frame(width: 230)
         .runeSurface(appearance, .large)
-    }
-}
-
-struct DownloadRow: View {
-    @ObservedObject var item: DownloadItem
-    var retry: (() -> Void)? = nil
-    @EnvironmentObject var appearance: AppearanceStore
-    @State private var hovering = false
-
-    var body: some View {
-        HStack(spacing: 9) {
-            Image(systemName: icon).font(.system(size: 14))
-                .foregroundStyle(item.state == .running ? appearance.accent
-                                                        : appearance.secondaryText(on: appearance.chrome))
-                .frame(width: 18)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.filename).lineLimit(1)
-                    .font(appearance.font(12)).foregroundStyle(appearance.chromeText)
-                if item.state == .running, let fraction = item.fraction {
-                    ProgressView(value: fraction).progressViewStyle(.linear).tint(appearance.accent)
-                } else if item.state == .running {
-                    ProgressView().progressViewStyle(.linear).tint(appearance.accent)
-                }
-                Text(item.sizeLabel).font(appearance.font(10))
-                    .foregroundStyle(appearance.secondaryText(on: appearance.chrome))
-            }
-            Spacer(minLength: 0)
-            if item.isRunning {
-                Button { item.cancel() } label: { Image(systemName: "xmark.circle.fill") }
-                    .buttonStyle(.plain).help("Cancel")
-                    .foregroundStyle(appearance.secondaryText(on: appearance.chrome))
-            } else if case .failed = item.state, let retry {
-                // Cancelled or broken — the source URL is still known, so the
-                // row offers to go get it again.
-                Button(action: retry) { Image(systemName: "arrow.clockwise.circle.fill") }
-                    .buttonStyle(.plain).help("Try Again")
-                    .foregroundStyle(appearance.accent)
-            } else if item.state == .finished, hovering {
-                Button { item.reveal() } label: { Image(systemName: "magnifyingglass.circle.fill") }
-                    .buttonStyle(.plain).help("Show in Finder")
-                    .foregroundStyle(appearance.secondaryText(on: appearance.chrome))
-            }
-        }
-        .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(hovering ? appearance.hover : .clear)
-        .contentShape(Rectangle())
-        .onHover { hovering = $0 }
-        .onTapGesture(count: 2) { item.open() }
-    }
-
-    private var icon: String {
-        switch item.state {
-        case .running: "arrow.down.circle"
-        case .finished: "doc"
-        case .failed: "exclamationmark.triangle"
-        }
     }
 }

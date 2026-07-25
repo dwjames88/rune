@@ -105,7 +105,7 @@ enum PageBridge {
       window.__runeMedia = () => lastMedia;
 
       // Right-click → tell native what's under the cursor, so the context menu
-      // can offer "Save to Rune Finder" and can repair WebKit's dead download
+      // can repair WebKit's dead download
       // items. Fires once per right-click.
       document.addEventListener('contextmenu', (e) => {
         const m = mediaInfo(e.target);

@@ -14,19 +14,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let shortcuts = ShortcutStore()
     let appearance = AppearanceStore()
     let claude = ClaudeService()
-    let finder = FinderStore()
     let downloads = DownloadStore()
     let sites = SiteSettings()
     let updater = Updater()
     lazy var blocker = ContentBlocker(settings: settings, sites: sites)
     lazy var ai = AIService(claude: claude, settings: settings)
     lazy var model = BrowserModel(settings: settings, history: history, shortcuts: shortcuts,
-                                  ai: ai, finder: finder, downloads: downloads,
+                                  ai: ai, downloads: downloads,
                                   sites: sites, blocker: blocker, appearance: appearance)
     lazy var settingsWindow = SettingsWindowController(
         settings: settings, shortcuts: shortcuts, history: history, appearance: appearance,
         ai: ai, sites: sites, updater: updater, model: { [unowned self] in self.model })
-    lazy var finderWindow = FinderWindowController(model: model, appearance: appearance)
     private var window: NSWindow?
 
     /// Every browser window and the model behind it — the main one, plus any
@@ -130,12 +128,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         }
 
-        // System-wide capture: "Save to Rune Finder" in every app's Services
-        // menu (declared in Info.plist; handled below).
-        NSApp.servicesProvider = self
-        NSUpdateDynamicServices()
-        FinderQuickAction.installIfNeeded()
-
         // The first minute of a public build: offer default-browser once,
         // after the window has had a moment to be a browser.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { self.offerDefaultBrowser() }
@@ -232,7 +224,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// good.
     private func newPrivateWindow() {
         let privateModel = BrowserModel(settings: settings, history: history, shortcuts: shortcuts,
-                                        ai: ai, finder: finder, downloads: downloads,
+                                        ai: ai, downloads: downloads,
                                         sites: sites, blocker: blocker, appearance: appearance,
                                         isPrivate: true)
         let window = makeBrowserWindow(for: privateModel)
@@ -252,33 +244,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         model.retireEverything()
     }
 
-    // MARK: System-wide capture
+    // MARK: Links & files from outside
 
-    /// Services menu: "Save to Rune Finder" — takes files, URLs, images, or
-    /// selected text from any app.
-    @objc func saveToRuneFinder(_ pboard: NSPasteboard, userData: String,
-                                error: AutoreleasingUnsafeMutablePointer<NSString>) {
-        ingest(pasteboard: pboard)
-    }
-
-    /// Same handler, second registration: Finder's context menu matches file
-    /// services on a pure NSSendFileTypes declaration, while text/image/URL
-    /// selections match NSSendTypes — so the service is declared twice under
-    /// one menu title (only one fits any given context).
-    @objc func saveToRuneFinderData(_ pboard: NSPasteboard, userData: String,
-                                    error: AutoreleasingUnsafeMutablePointer<NSString>) {
-        ingest(pasteboard: pboard)
-    }
-
-    /// Dock drops and "Open With Rune": web URLs open as tabs, files land in
-    /// the Finder library.
+    /// Dock drops and "Open With Rune": everything opens as a tab — a file is
+    /// a page too (WebKit renders images, PDFs, media).
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
-            if url.isFileURL {
-                Task { @MainActor in
-                    if (try? await finder.importFile(url)) != nil { savedFeedback() }
-                }
-            } else if settings.externalLinks == .segment {
+            if !url.isFileURL, settings.externalLinks == .segment {
                 // A link from another app is a visit, not a commitment.
                 detach(url, floating: false)
             } else {
@@ -286,49 +258,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 window?.makeKeyAndOrderFront(nil)
             }
         }
-    }
-
-    private func ingest(pasteboard pboard: NSPasteboard) {
-        // Snapshot pasteboard content NOW — service pasteboards don't outlive the call.
-        var fileURLs = (pboard.readObjects(forClasses: [NSURL.self],
-                                           options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
-        if fileURLs.isEmpty, let paths = pboard.propertyList(forType: NSPasteboard.PasteboardType("NSFilenamesPboardType")) as? [String] {
-            fileURLs = paths.map { URL(fileURLWithPath: $0) }
-        }
-        let imageData = pboard.data(forType: .png) ?? pboard.data(forType: .tiff)
-        let text = pboard.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        Task { @MainActor in
-            var saved = 0
-            // 1. Files (Finder selections, image drags from apps)
-            if !fileURLs.isEmpty {
-                for url in fileURLs {
-                    do { _ = try await finder.importFile(url); saved += 1 }
-                    catch { NSLog("Rune service: import failed for %@ — %@", url.path, "\(error)") }
-                }
-            }
-            // 2. Raw image data (copied images)
-            else if let data = imageData {
-                let png = NSImage(data: data)?.png ?? data
-                if (try? await finder.save(data: png, ext: "png", fileName: "Image",
-                                           sourceURL: "", sourceTitle: "")) != nil { saved += 1 }
-            }
-            // 3. Text: URLs download, anything else is kept as a snippet
-            else if let text, !text.isEmpty {
-                if let url = URL(string: text), let scheme = url.scheme, scheme.hasPrefix("http") {
-                    if (try? await finder.save(assetURL: url, sourceURL: text, sourceTitle: "")) != nil { saved += 1 }
-                } else if (try? await finder.saveText(text)) != nil { saved += 1 }
-            }
-            if saved > 0 { savedFeedback(count: saved) }
-        }
-    }
-
-    /// Feedback that works even when Rune is in the background: in-app toast
-    /// plus a gentle dock bounce.
-    private func savedFeedback(count: Int = 1) {
-        NotificationCenter.default.post(name: .finderToast,
-                                        object: count == 1 ? "Saved to Finder" : "Saved \(count) items to Finder")
-        if !NSApp.isActive { NSApp.requestUserAttention(.informationalRequest) }
     }
 
     // Auto-PiP on leaving the app (the "window blur" case). App-level rather
@@ -428,13 +357,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func dispatch(_ command: Command) {
-        // Commands that act on the browser should be seen acting: invoked from
-        // the Finder window, ⌘K/⌘T/⌘L would otherwise work invisibly behind it.
-        let worksAnywhere: Set<Command> = [.openFinder, .openSettings, .closeTab, .newPrivateWindow,
-                                          .showDownloads]
-        if finderWindow.isKey, !worksAnywhere.contains(command) {
-            window?.makeKeyAndOrderFront(nil)
-        }
         let model = frontModel
         // Overlays live inside a BrowserView, so they're asked for by
         // broadcast; naming the model keeps a second window out of it.
@@ -447,9 +369,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .newTab:
             if settings.newTabBehavior == .addressOverlay { show(.showNewTabOverlay) }
             else { model.newTab() }
-        case .closeTab:
-            // ⌘W closes the window you're looking at, not a hidden tab.
-            if finderWindow.isKey { finderWindow.close() } else { model.closeActive() }
+        case .closeTab: model.closeActive()
         case .reload: model.reload()
         case .goBack: model.goBack()
         case .goForward: model.goForward()
@@ -464,7 +384,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .zoomOut: model.zoom(.smaller)
         case .zoomReset: model.zoom(.reset)
         case .printPage: model.printPage()
-        case .showDownloads: finderWindow.showDownloads()
+        case .showDownloads:
+            // The list is the folder itself — Rune saves there and gets out
+            // of the way; progress lives on the corner card meanwhile.
+            downloads.hasUnseen = false
+            NSWorkspace.shared.open(AssetSaver.directory(settings))
         case .toggleBlocking: model.toggleBlockingForActiveSite()
         case .toggleSplit: model.toggleSplit()
         case .togglePanel: model.togglePanel()
@@ -479,7 +403,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .previousSpace: model.selectAdjacentSpace(-1)
         case .muteTab: model.activeTab?.toggleMute()
         case .newPrivateWindow: newPrivateWindow()
-        case .openFinder: finderWindow.toggle()
         case .saveMediaUnderCursor: model.saveMediaUnderCursor()
         case .collectFromPage: model.collectFromPage()
         case .capturePage: model.capturePage()
