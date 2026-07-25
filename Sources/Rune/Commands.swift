@@ -37,7 +37,6 @@ enum Command: String, CaseIterable, Identifiable {
     case previousSpace
     case muteTab
     case newPrivateWindow
-    case openFinder
     case saveMediaUnderCursor
     case collectFromPage
     case capturePage
@@ -80,10 +79,9 @@ enum Command: String, CaseIterable, Identifiable {
         case .previousSpace: "Previous Space"
         case .muteTab: "Mute / Unmute Tab"
         case .newPrivateWindow: "New Private Window"
-        case .openFinder: "Open Finder"
         case .saveMediaUnderCursor: "Save Image Under Cursor"
         case .collectFromPage: "Collect Images from Page…"
-        case .capturePage: "Capture Page to Finder"
+        case .capturePage: "Capture Page as Image"
         case .editControls: "Customize Controls…"
         case .openSettings: "Settings…"
         }
@@ -124,7 +122,6 @@ enum Command: String, CaseIterable, Identifiable {
         case .previousSpace: "square.stack"
         case .muteTab: "speaker.slash"
         case .newPrivateWindow: "eyeglasses.slash"
-        case .openFinder: "sparkles.rectangle.stack"
         case .saveMediaUnderCursor: "photo.badge.arrow.down"
         case .collectFromPage: "square.grid.3x3.square"
         case .capturePage: "camera.viewfinder"
@@ -136,12 +133,12 @@ enum Command: String, CaseIterable, Identifiable {
     /// Which menu section it belongs under.
     var menu: MenuSection {
         switch self {
-        case .newTab, .closeTab, .undoCloseTab, .newPrivateWindow, .copyURL, .printPage, .pinTab: .file
+        case .newTab, .closeTab, .undoCloseTab, .newPrivateWindow, .copyURL, .printPage, .pinTab,
+             .saveMediaUnderCursor, .collectFromPage, .capturePage: .file
         case .reload, .findInPage, .zoomIn, .zoomOut, .zoomReset, .muteTab, .showDownloads, .toggleBlocking, .toggleSplit, .togglePanel, .toggleReader, .toggleZen,
              .toggleSidebar, .togglePiP, .commandPalette, .askPage, .editControls: .view
         case .goBack, .goForward: .history
         case .focusAddress, .nextTab, .previousTab, .newSpace, .nextSpace, .previousSpace, .saveSession: .navigate
-        case .openFinder, .saveMediaUnderCursor, .collectFromPage, .capturePage: .finder
         case .openSettings: .app
         }
     }
@@ -181,7 +178,6 @@ enum Command: String, CaseIterable, Identifiable {
         case .previousSpace: ("[", [.command, .control])
         case .muteTab: ("m", [.command, .control])
         case .newPrivateWindow: ("n", [.command, .shift])
-        case .openFinder: ("f", [.command, .option])
         case .saveMediaUnderCursor: ("s", .option)
         case .collectFromPage: ("s", [.command, .shift])
         case .capturePage: ("", [])
@@ -196,6 +192,5 @@ enum Command: String, CaseIterable, Identifiable {
         case view = "View"
         case history = "History"
         case navigate = "Go"
-        case finder = "Finder"
     }
 }

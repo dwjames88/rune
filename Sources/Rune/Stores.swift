@@ -263,9 +263,7 @@ final class SettingsStore: ObservableObject {
     /// Claude link previews: hover a link this long before the summary appears.
     @Published var linkHoverEnabled: Bool { didSet { save(); hoverChanged() } }
     @Published var linkHoverDelay: Double { didSet { save(); hoverChanged() } }
-    /// Finder: tag saves automatically with Claude (text-context, cheap).
-    @Published var finderAutoTag: Bool { didSet { save() } }
-    /// Finder batch collect: skip images smaller than this on either side.
+    /// Batch collect: skip images smaller than this on either side.
     @Published var finderMinCollectSize: Double { didSet { save() } }
     /// Which model runs Rune's AI. On-device by default — free, private and
     /// offline; Claude is the upgrade you opt into.
@@ -285,6 +283,10 @@ final class SettingsStore: ObservableObject {
     @Published var hideCookieBanners: Bool { didSet { save(); blockingChanged() } }
     /// Where finished downloads land.
     @Published var downloadLocation: DownloadLocation { didSet { save() } }
+    /// The download folder itself — nil/empty = the system Downloads folder.
+    /// Every save Rune makes (downloads, grabbed images, page captures)
+    /// resolves through this.
+    @Published var downloadDirectory: String? { didSet { save() } }
     /// Reopen last session's tabs on launch. Off by design: session tabs are
     /// meant to be disposable, but that should be your call, not ours.
     @Published var restoreSession: Bool { didSet { save() } }
@@ -303,9 +305,9 @@ final class SettingsStore: ObservableObject {
         var newTabPlacement: NewTabPlacement?
         var linkHoverEnabled: Bool?
         var linkHoverDelay: Double?
-        var finderAutoTag: Bool?
         var finderMinCollectSize: Double?
         var downloadLocation: DownloadLocation?
+        var downloadDirectory: String?
         var restoreSession: Bool?
         var aiModel: AIModel?
         var blockContent: Bool?
@@ -327,9 +329,9 @@ final class SettingsStore: ObservableObject {
         newTabPlacement = saved?.newTabPlacement ?? .end
         linkHoverEnabled = saved?.linkHoverEnabled ?? true
         linkHoverDelay = saved?.linkHoverDelay ?? 0.45
-        finderAutoTag = saved?.finderAutoTag ?? false
         finderMinCollectSize = saved?.finderMinCollectSize ?? 200
         downloadLocation = saved?.downloadLocation ?? .downloadsFolder
+        downloadDirectory = saved?.downloadDirectory
         restoreSession = saved?.restoreSession ?? false
         aiModel = saved?.aiModel ?? .onDevice
         externalLinks = saved?.externalLinks ?? .segment
@@ -348,8 +350,9 @@ final class SettingsStore: ObservableObject {
                                  newTabBehavior: newTabBehavior, homePageURL: homePageURL,
                                  newTabPlacement: newTabPlacement,
                                  linkHoverEnabled: linkHoverEnabled, linkHoverDelay: linkHoverDelay,
-                                 finderAutoTag: finderAutoTag, finderMinCollectSize: finderMinCollectSize,
-                                 downloadLocation: downloadLocation, restoreSession: restoreSession,
+                                 finderMinCollectSize: finderMinCollectSize,
+                                 downloadLocation: downloadLocation,
+                                 downloadDirectory: downloadDirectory, restoreSession: restoreSession,
                                  aiModel: aiModel, blockContent: blockContent,
                                  hideCookieBanners: hideCookieBanners,
                                  externalLinks: externalLinks,
@@ -560,7 +563,6 @@ extension Notification.Name {
     /// Wiggle mode: the strip and corner kit start (or stop) taking edits.
     static let toggleControlEdit = Notification.Name("rune.toggleControlEdit")
     /// Open the Finder window already turned to its Downloads section.
-    static let finderShowDownloads = Notification.Name("rune.finderShowDownloads")
     static let glanceLink = Notification.Name("rune.glanceLink")
     static let blockingSettingsChanged = Notification.Name("rune.blockingSettingsChanged")
     /// A left click landed on a page. Address bars listen and let focus go —

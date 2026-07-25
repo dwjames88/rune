@@ -6,3 +6,7 @@
 # macOS
 .DS_Store
 dist/
+
+# The iOS device build needs a project for code signing (the simulator path
+# in scripts/ios-run.sh does not) — that one is tracked, see below.
+ios/Rune.xcodeproj/xcuserdata/

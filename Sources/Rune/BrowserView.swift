@@ -116,13 +116,19 @@ private struct Sidebar: View {
         VStack(alignment: .leading, spacing: 0) {
             // The window's top-left verbs: Rune's own lights, and the sidebar
             // toggle beside them — always present, because it's also the way
-            // back once the sidebar is gone.
-            HStack(spacing: 8) {
-                if !appearance.appearance.hideTrafficLights { TrafficLights() }
-                CommandButton(model: model, command: .toggleSidebar, dispatch: dispatch)
+            // back once the sidebar is gone. In zen both live on the strip
+            // instead: this sidebar is a hover-reveal floating over the page,
+            // and a second set of lights there would be two of one window.
+            if !model.zenActive {
+                HStack(spacing: 8) {
+                    if !appearance.appearance.hideTrafficLights { TrafficLights() }
+                    CommandButton(model: model, command: .toggleSidebar, dispatch: dispatch)
+                }
+                .padding(.leading, appearance.appearance.hideTrafficLights ? 6 : 12)
+                .padding(.top, 8).padding(.bottom, 4)
+            } else {
+                Color.clear.frame(height: 10)
             }
-            .padding(.leading, appearance.appearance.hideTrafficLights ? 6 : 12)
-            .padding(.top, 8).padding(.bottom, 4)
 
             if model.isPrivate { privateBanner } else { SpaceBar(model: model, dispatch: dispatch) }
 
@@ -140,21 +146,12 @@ private struct Sidebar: View {
             }
 
             Spacer(minLength: 0)
-            HStack(spacing: 0) {
-                Button { model.newTab() } label: {
-                    Label("New Tab", systemImage: "plus").font(appearance.font(13))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 8).padding(.vertical, 7)
-                }
-                .buttonStyle(.plain)
-                Button { dispatch(.openFinder) } label: {
-                    Image(systemName: "sparkles.rectangle.stack")
-                        .font(.system(size: 13))
-                        .padding(.horizontal, 8).padding(.vertical, 7)
-                }
-                .buttonStyle(.plain)
-                .help("Finder — saved inspiration (⌥⌘F)")
+            Button { model.newTab() } label: {
+                Label("New Tab", systemImage: "plus").font(appearance.font(13))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 8).padding(.vertical, 7)
             }
+            .buttonStyle(.plain)
             .foregroundStyle(appearance.sidebarSecondary).padding(8)
         }
         .background {
@@ -2354,6 +2351,100 @@ private struct MinimalChrome: View {
         .onReceive(themePublisher) { tint = $0 }
         .onChange(of: model.selection) { tint = model.activeTab?.themeColor }
         .onChange(of: model.focusedPane) { tint = model.activeTab?.themeColor }
+    }
+}
+
+// MARK: - Collect sheet
+
+/// ⇧⌘S: the page's images laid out to pick from, saving straight into the
+/// download folder. The grab tools' biggest room.
+struct CollectSheet: View {
+    @ObservedObject var model: BrowserModel
+    let candidates: [CollectCandidate]
+    @EnvironmentObject var appearance: AppearanceStore
+
+    @State private var picked: Set<String> = []
+    @State private var previews: [String: NSImage] = [:]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Collect from this page").font(appearance.font(14, weight: .semibold))
+                Spacer()
+                Button(picked.count == candidates.count ? "Select None" : "Select All") {
+                    picked = picked.count == candidates.count ? [] : Set(candidates.map(\.id))
+                }
+                .font(appearance.font(11))
+                Button { model.collectCandidates = nil } label: {
+                    Image(systemName: "xmark").font(.system(size: 10))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(12)
+            Divider().overlay(appearance.hairline)
+
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 10)], spacing: 10) {
+                    ForEach(candidates) { c in
+                        candidateCell(c)
+                    }
+                }
+                .padding(12)
+            }
+            .frame(maxHeight: 380)
+
+            Divider().overlay(appearance.hairline)
+            HStack(spacing: 8) {
+                Text("Saves to \(AssetSaver.directory(model.settings).lastPathComponent)")
+                    .font(appearance.font(11)).foregroundStyle(.secondary)
+                Spacer()
+                Button("Save \(picked.count)") {
+                    model.saveAssets(candidates.filter { picked.contains($0.id) }
+                        .compactMap { URL(string: $0.src) })
+                    model.collectCandidates = nil
+                }
+                .disabled(picked.isEmpty)
+                .keyboardShortcut(.return)
+            }
+            .padding(12)
+        }
+        .frame(width: 560)
+        .runeSurface(appearance, .large)
+        .onAppear { picked = Set(candidates.prefix(20).map(\.id)) }
+    }
+
+    private func candidateCell(_ c: CollectCandidate) -> some View {
+        let on = picked.contains(c.id)
+        return ZStack(alignment: .topTrailing) {
+            Group {
+                if let img = previews[c.id] {
+                    Image(nsImage: img).resizable().scaledToFill()
+                } else {
+                    RoundedRectangle(cornerRadius: 6).fill(appearance.hover)
+                        .overlay(ProgressView().controlSize(.small).scaleEffect(0.5))
+                        .task {
+                            guard previews[c.id] == nil, let url = URL(string: c.src),
+                                  let (data, _) = try? await URLSession.shared.data(from: url),
+                                  let img = NSImage(data: data) else { return }
+                            previews[c.id] = img
+                        }
+                }
+            }
+            .frame(width: 110, height: 84)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(on ? appearance.accent : appearance.hairline, lineWidth: on ? 2 : 1))
+            Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 13))
+                .foregroundStyle(on ? appearance.accent : .white.opacity(0.85))
+                .shadow(radius: 2)
+                .padding(4)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if on { picked.remove(c.id) } else { picked.insert(c.id) }
+        }
+        .help(c.w > 0 ? "\(c.w) × \(c.h)" : c.src)
     }
 }
 

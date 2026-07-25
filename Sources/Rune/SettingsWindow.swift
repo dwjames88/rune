@@ -606,10 +606,36 @@ private struct BrowsingPane: View {
                 Picker("Save downloads to", selection: $settings.downloadLocation) {
                     ForEach(DownloadLocation.allCases) { Text($0.label).tag($0) }
                 }
+                LabeledContent("Download folder") {
+                    HStack(spacing: 8) {
+                        Text(AssetSaver.directory(settings).path
+                            .replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                            .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        Button("Choose…") {
+                            let panel = NSOpenPanel()
+                            panel.canChooseFiles = false
+                            panel.canChooseDirectories = true
+                            panel.canCreateDirectories = true
+                            panel.directoryURL = AssetSaver.directory(settings)
+                            if panel.runModal() == .OK, let url = panel.url {
+                                settings.downloadDirectory = url.path
+                            }
+                        }
+                        if settings.downloadDirectory != nil {
+                            Button("Reset") { settings.downloadDirectory = nil }
+                        }
+                    }
+                }
+                HStack {
+                    Text("Batch collect: skip images smaller than")
+                    TextField("", value: $settings.finderMinCollectSize, format: .number)
+                        .frame(width: 50).multilineTextAlignment(.trailing)
+                    Text("px")
+                }
             } header: {
-                Text("Downloads")
+                Text("Downloads & Saves")
             } footer: {
-                Text("⌥⌘L lists what you've fetched this launch. Turn “\(Command.showDownloads.title)” on under Appearance ▸ Toolbar for a button with live progress.")
+                Text("Everything Rune saves lands here — downloads, right-clicked images, ⌥S grabs, ⇧⌘S collections, page captures. “Ask where to save” brings a Save As dialog for single files instead; ⌥⌘L opens the folder.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
@@ -654,20 +680,6 @@ private struct BrowsingPane: View {
                 Text("Media")
             } footer: {
                 Text("A playing video pops into a floating window when you leave its tab. \"\(Command.togglePiP.title)\" in the View menu toggles it manually. Sound-only keeps muted autoplay videos — hero banners, hover previews — from popping up uninvited.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Section {
-                Toggle("Auto-tag saves with AI", isOn: $settings.finderAutoTag)
-                HStack {
-                    Text("Batch collect: skip images smaller than")
-                    TextField("", value: $settings.finderMinCollectSize, format: .number)
-                        .frame(width: 50).multilineTextAlignment(.trailing)
-                    Text("px")
-                }
-            } header: {
-                Text("Finder")
-            } footer: {
-                Text("The Finder saves inspiration from the web — right-click any image, press ⌥S for the image under your cursor, or ⇧⌘S to collect a whole page. Open it with ⌥⌘F.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Browsing Data") {

@@ -44,7 +44,7 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
                 guard let runeView = webView as? RuneWebView else { return }
                 let media = (body["src"] as? String).flatMap { URL(string: $0) }
                 let link = (body["href"] as? String).flatMap { URL(string: $0) }
-                let kind: FinderItem.Kind = (body["kind"] as? String) == "video" ? .video : .image
+                let kind: MediaKind = (body["kind"] as? String) == "video" ? .video : .image
                 runeView.contextTarget = media == nil && link == nil
                     ? nil : .init(media: media, kind: kind, link: link, at: Date())
             default: break
@@ -223,10 +223,7 @@ extension WebCoordinator: WKDownloadDelegate {
         let destination: URL?
         switch model.settings.downloadLocation {
         case .downloadsFolder:
-            destination = DownloadStore.uniqueURL(in: DownloadStore.downloadsFolder, filename: name)
-        case .finderLibrary:
-            // Stage in temp; the library ingests it once the bytes have landed.
-            destination = DownloadStore.uniqueURL(in: Self.stagingDirectory, filename: name)
+            destination = DownloadStore.uniqueURL(in: AssetSaver.directory(model.settings), filename: name)
         case .ask:
             destination = await Self.askForDestination(name: name)
         }
@@ -244,11 +241,7 @@ extension WebCoordinator: WKDownloadDelegate {
     func downloadDidFinish(_ download: WKDownload) {
         guard let item = activeDownloads.removeValue(forKey: ObjectIdentifier(download)) else { return }
         item.state = .finished
-        if model?.settings.downloadLocation == .finderLibrary, let staged = item.destination {
-            ingest(staged, into: item)
-        } else {
-            NotificationCenter.default.post(name: .finderToast, object: "Downloaded \(item.filename)")
-        }
+        NotificationCenter.default.post(name: .finderToast, object: "Downloaded \(item.filename)")
     }
 
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
@@ -257,22 +250,6 @@ extension WebCoordinator: WKDownloadDelegate {
         // framework's "operation couldn't be completed".
         if case .failed = item.state { return }
         item.state = .failed(error.localizedDescription)
-    }
-
-    /// Move a staged download into the Finder library and point the row at its
-    /// copy there, so "Show in Finder" still leads somewhere real.
-    private func ingest(_ staged: URL, into item: DownloadItem) {
-        guard let finder = model?.finder else { return }
-        Task { @MainActor in
-            if let saved = try? await finder.importFile(staged) {
-                item.destination = finder.fileURL(for: saved)
-                NotificationCenter.default.post(name: .finderToast,
-                                                object: "Downloaded \(item.filename) to Finder")
-            } else {
-                item.state = .failed("Couldn't add it to the Finder library")
-            }
-            try? FileManager.default.removeItem(at: staged)
-        }
     }
 
     private static var stagingDirectory: URL {
