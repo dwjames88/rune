@@ -369,7 +369,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .newTab:
             if settings.newTabBehavior == .addressOverlay { show(.showNewTabOverlay) }
             else { model.newTab() }
-        case .closeTab: model.closeActive()
+        case .closeTab:
+            // ⌘W closes what you're looking at; with nothing left to close it
+            // closes the window, rather than leaving an empty one you can only
+            // get out of with the mouse. A private window in that state is a
+            // dead end — no favorites, no rows, nothing to click.
+            if model.currentSelection == nil {
+                NSApp.keyWindow?.performClose(nil)
+            } else {
+                model.closeActive()
+            }
         case .reload: model.reload()
         case .goBack: model.goBack()
         case .goForward: model.goForward()
