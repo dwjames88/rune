@@ -21,8 +21,8 @@ kagi.com/orion, apple.com/safari.
 Already have (skip): sidebar tabs · persistent web views · themes/presets ·
 command palette · shortcut remapping · pop-out video (Auto-PiP) · editable
 toolbar · compact address bar · custom search engines · ambient AI (hover
-summaries, ⌘J, selection actions, AI address bar) · Finder inspiration library
-with system-wide capture.
+summaries, ⌘J, selection actions, AI address bar) · web-asset grabs (right-click,
+⌥S, ⇧⌘S collect, page capture) straight to your download folder.
 
 ## Tier 1 — Fundamentals ✅ DONE (2026-07-16)
 
@@ -30,8 +30,10 @@ All shipped. Kept here as the map of what landed where.
 
 1. **Downloads** — `Downloads.swift`: `WKDownloadDelegate` on `WebCoordinator`,
    `DownloadStore` aggregating progress, toolbar ring + panel (⌥⌘L), toast on
-   finish, reveal/open. Destination is a setting: Downloads folder / ask each
-   time / straight into the Finder library.
+   finish, reveal/open. Destination is a setting: the download folder (which
+   you pick) or ask each time. **v1.16**: the Finder library window was
+   removed — every save Rune makes goes through `AssetSaver` into that one
+   folder. The grabbing tools stayed; the filing cabinet went.
 2. **Find in Page (⌘F)** — `FindBar.swift`, native `webView.find(_:)`. No match
    count: `WKFindResult` only reports whether it hit, and counting would mean
    walking the DOM per keystroke. The field turns red instead.
@@ -131,7 +133,7 @@ All shipped. Kept here as the map of what landed where.
      costs a field, not a file. Auto-PiP allowlist and per-site theme are the
      remaining candidates.
 
-## Tier 3 — Rune-only flagships (the moat: Claude + Finder + themes)
+## Tier 3 — Rune-only flagships (the moat: Claude + themes + sync)
 
 1. **Catch-up brief** (Dia's Morning Brief, ambient) — start-page card:
    Claude clusters yesterday's history into "you were researching X" with
@@ -139,13 +141,32 @@ All shipped. Kept here as the map of what landed where.
 2. **AI tab organization** (Dia) — one command: name + group current session
    tabs into folders (low-effort Claude call).
 3. **Research mode** — "collect this browsing session": tabs + selected
-   images/text into a tagged Finder folder; export as moodboard/markdown.
+   images/text exported as a moodboard/markdown into the download folder.
 4. **Boosts-lite** (Arc) — per-site CSS/JS snippets (zap annoyances, restyle
    sites) stored data-driven like everything else; PageBridge injects.
+   **Next up.**
 5. **Page automations** (Dia skills/Comet) — recorded PageBridge action +
    Claude reasoning ("every morning open these, summarize what changed").
+   **Next up, with 4.**
 6. **Theme sync with wallpaper/space** — per-Space appearance follows macOS
    appearance or wallpaper accent.
+
+## Tier 4 — Rune for iOS (started v1.16)
+
+`ios/` is a second SwiftPM package: a phone-shaped Rune whose whole chrome is
+one floating bar (page-tinted Liquid Glass), with a card tab-switcher that also
+carries the sidebar's favourites and folders. `scripts/ios-run.sh` builds it
+for the simulator with no Xcode project; `ios/Rune.xcodeproj` exists only
+because a device build needs one to code-sign.
+
+1. **Folder + tab sync** — the point of the iOS app. `SyncState` (favourites,
+   folders, tabs) is already the on-disk shape on both ends, chosen as the wire
+   format. Transport: local network first (Bonjour + `Network.framework`, zero
+   dependencies); CloudKit waits on a Developer Program membership.
+2. **Favicons** — the phone draws letter chips today; the Mac already fetches
+   and caches real ones per host.
+3. **Settings on the phone** — the appearance store is Codable and shared in
+   spirit; the phone should read the same theme sync carries over.
 
 ## Suggested build order
 
@@ -159,5 +180,8 @@ Rationale: content blocking is the single biggest daily-experience upgrade
 WebKit gives us for free; split view + spaces are the flagship pair every
 modern browser converged on, and both want the same window-model work;
 FoundationModels before the Tier 3 AI features so they're built on the local
-model from the start rather than ported to it; then the Claude/Finder moat
+model from the start rather than ported to it; then the Claude + sync moat
 nobody else can copy cheaply.
+
+From v1.16 the appetite is: **Boosts-lite (3.4) and Page automations (3.5)**,
+then **folder/tab sync (4.1)** to make the phone worth carrying.
