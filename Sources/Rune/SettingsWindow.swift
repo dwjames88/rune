@@ -732,6 +732,14 @@ private struct BrowsingPane: View {
                 Text("A playing video pops into a floating window when you leave its tab. \"\(Command.togglePiP.title)\" in the View menu toggles it manually. Sound-only keeps muted autoplay videos — hero banners, hover previews — from popping up uninvited.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section {
+                Toggle("Enable the Web Inspector", isOn: $settings.developerExtras)
+            } header: {
+                Text("Developer")
+            } footer: {
+                Text("Adds **Inspect Element** to the page's right-click menu, and lets Safari's Develop ▸ \(Host.current().localizedName ?? "This Mac") menu attach to a Rune tab. Off by default, the way Safari hides its Develop menu — WebKit ships every web view uninspectable until an app opts in, which is why a browser can otherwise have no developer tools at all.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Browsing Data") {
                 LabeledContent("History") {
                     HStack { Text("\(history.entries.count) entries").foregroundStyle(.secondary)

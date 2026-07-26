@@ -375,6 +375,10 @@ final class BrowserModel: ObservableObject {
             forName: .blockingSettingsChanged, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.reloadBlocking() }
         }
+        developerObserver = NotificationCenter.default.addObserver(
+            forName: .developerExtrasChanged, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.applyDeveloperExtras() }
+        }
         // Rules attach to the configuration every web view is built from, so
         // this covers tabs that don't exist yet — including a private window's,
         // which gets blocking for free.
@@ -399,6 +403,7 @@ final class BrowserModel: ObservableObject {
     // nonisolated deinit can hand them back without hopping actors.
     private nonisolated(unsafe) var hoverObserver: (any NSObjectProtocol)?
     private nonisolated(unsafe) var blockingObserver: (any NSObjectProtocol)?
+    private nonisolated(unsafe) var developerObserver: (any NSObjectProtocol)?
 
     /// A private window's model dies with its window. Its observers have to go
     /// with it: block-based registrations outlive the object they capture
@@ -407,6 +412,7 @@ final class BrowserModel: ObservableObject {
     deinit {
         if let hoverObserver { NotificationCenter.default.removeObserver(hoverObserver) }
         if let blockingObserver { NotificationCenter.default.removeObserver(blockingObserver) }
+        if let developerObserver { NotificationCenter.default.removeObserver(developerObserver) }
         tidySweep?.cancel()
     }
 
@@ -828,11 +834,24 @@ final class BrowserModel: ObservableObject {
         let webView = RuneWebView(frame: .zero, configuration: configuration ?? self.configuration)
         webView.navigationDelegate = coordinator
         webView.uiDelegate = coordinator
+        // Web Inspector. `isInspectable` defaults to false on every WKWebView,
+        // which is why a browser built on one has no developer tools at all
+        // until it says otherwise. Off by default here too — Safari hides its
+        // Develop menu until you ask for it, and a stray Inspect in the context
+        // menu is noise for everyone who isn't building a page.
+        webView.isInspectable = settings.developerExtras
         webView.onDownload = { [weak self, weak webView] url in
             guard let webView else { return }
             self?.coordinator.startDownload(url, from: webView)
         }
         return webView
+    }
+
+    /// Flip the Inspector on (or off) for every page that already exists —
+    /// otherwise the setting would only reach tabs opened afterwards.
+    func applyDeveloperExtras() {
+        for tab in allTabs { tab.webView.isInspectable = settings.developerExtras }
+        panel?.webView.isInspectable = settings.developerExtras
     }
 
     // MARK: Asset grabs

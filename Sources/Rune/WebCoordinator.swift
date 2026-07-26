@@ -247,9 +247,15 @@ extension WebCoordinator: WKDownloadDelegate {
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
         guard let item = activeDownloads.removeValue(forKey: ObjectIdentifier(download)) else { return }
         // A cancel arrives here too; don't overwrite the nicer reason with the
-        // framework's "operation couldn't be completed".
+        // framework's "operation couldn't be completed" — and don't announce a
+        // cancellation back to the person who just cancelled it.
         if case .failed = item.state { return }
         item.state = .failed(error.localizedDescription)
+        // Say so. The progress card only shows what's running, so without this
+        // a download that dies simply vanishes mid-flight and never arrives —
+        // the one outcome you most need to be told about.
+        NotificationCenter.default.post(name: .finderToast,
+                                        object: "Couldn't download \(item.filename)")
     }
 
     private static var stagingDirectory: URL {
