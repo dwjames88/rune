@@ -71,9 +71,27 @@ struct LocalModelProvider: AIProvider {
         LanguageModelSession(instructions: system)
     }
 
+    /// The on-device model's context window is a few thousand tokens for
+    /// everything — instructions, the page, the question and the answer. A long
+    /// article sent whole overflows it and comes back as
+    /// `exceededContextWindowSize`, which reads to the user as the feature being
+    /// broken. Claude has room to spare; this one needs the page trimmed to fit.
+    ///
+    /// Kept deliberately conservative and measured in characters, since that's
+    /// what we have: roughly four per token, minus the room the answer needs.
+    private func fitted(_ user: String, answerTokens: Int) -> String {
+        let budget = max(1200, (3500 - answerTokens) * 4)
+        guard user.count > budget else { return user }
+        // Keep the head — the question is appended last, so keep that too.
+        let head = user.prefix(budget - 400)
+        let tail = user.suffix(360)
+        return "\(head)\n…\n\(tail)"
+    }
+
     func complete(system: String, user: String, maxTokens: Int, effort: AIEffort) async throws -> String {
         try await session(system)
-            .respond(to: user, options: GenerationOptions(maximumResponseTokens: maxTokens))
+            .respond(to: fitted(user, answerTokens: maxTokens),
+                     options: GenerationOptions(maximumResponseTokens: maxTokens))
             .content
     }
 
@@ -87,7 +105,8 @@ struct LocalModelProvider: AIProvider {
                     // print the answer once per token.
                     var emitted = ""
                     let responses = session(system)
-                        .streamResponse(to: user, options: GenerationOptions(maximumResponseTokens: maxTokens))
+                        .streamResponse(to: fitted(user, answerTokens: maxTokens),
+                                        options: GenerationOptions(maximumResponseTokens: maxTokens))
                     for try await snapshot in responses {
                         let text = snapshot.content
                         guard text.hasPrefix(emitted) else { emitted = text; continue }
