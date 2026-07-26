@@ -104,6 +104,81 @@ enum PageBridge {
       document.addEventListener('mouseover', (e) => { lastMedia = mediaInfo(e.target); }, true);
       window.__runeMedia = () => lastMedia;
 
+      // Picture in Picture, in every frame.
+      //
+      // evaluateJavaScript only ever runs in the main frame, and a great many
+      // players — Vimeo, embedded YouTube, anything in an <iframe> — keep
+      // their <video> a frame down, where document.querySelectorAll('video')
+      // from the top can't see it (and cross-origin can't be reached across).
+      // This script is injected into every frame, so each one can answer for
+      // itself: the top frame tries locally, then broadcasts to its children,
+      // and each child does the same. First one with a video wins.
+      //
+      // WebKit doesn't implement the W3C API (document.pictureInPictureEnabled
+      // is undefined); its own path is webkitSetPresentationMode, which needs
+      // no user gesture. The W3C call stays as a fallback in case that changes.
+      const pipPlaying = (v) => !v.paused && !v.ended && v.readyState > 2;
+      const pipAudible = (v) => !v.muted && v.volume > 0;
+      const pipActive = () =>
+        [...document.querySelectorAll('video')]
+          .find(v => v.webkitPresentationMode === 'picture-in-picture')
+        || document.pictureInPictureElement || null;
+
+      const pipEnterHere = (audibleOnly, anyState) => {
+        if (pipActive()) return 'already-pip';
+        const vids = [...document.querySelectorAll('video')];
+        // Autoplay heroes and hover previews are forced to start muted, so a
+        // video with sound is the one you actually chose to watch. Even when
+        // sound isn't required it breaks the tie between several playing ones.
+        let v = vids.find(x => pipPlaying(x) && pipAudible(x));
+        if (!v && !audibleOnly) v = vids.find(pipPlaying);
+        if (!v && anyState) v = vids.find(x => x.readyState > 2);
+        if (!v) return null;
+        if (v.webkitSupportsPresentationMode && v.webkitSupportsPresentationMode('picture-in-picture')) {
+          v.webkitSetPresentationMode('picture-in-picture'); return 'webkit';
+        }
+        if (document.pictureInPictureEnabled && v.requestPictureInPicture) {
+          v.requestPictureInPicture().catch(() => {}); return 'w3c';
+        }
+        return 'unsupported';
+      };
+
+      const pipExitHere = () => {
+        const v = [...document.querySelectorAll('video')]
+          .find(x => x.webkitPresentationMode === 'picture-in-picture');
+        if (v) { v.webkitSetPresentationMode('inline'); return 'webkit'; }
+        if (document.pictureInPictureElement) {
+          document.exitPictureInPicture().catch(() => {}); return 'w3c';
+        }
+        return null;
+      };
+
+      const pipBroadcast = (msg) => {
+        for (const f of document.querySelectorAll('iframe')) {
+          try { f.contentWindow.postMessage(msg, '*'); } catch (e) {}
+        }
+      };
+
+      // Try here; if this frame has nothing, ask the children. Returns what
+      // happened locally — a child's answer arrives on its own, which is why
+      // the native side treats 'delegated' as "wait and see".
+      window.__runePiP = (action, audibleOnly, anyState) => {
+        const local = action === 'exit' ? pipExitHere() : pipEnterHere(audibleOnly, anyState);
+        if (local) return local;
+        const kids = document.querySelectorAll('iframe').length;
+        if (kids) {
+          pipBroadcast({ __rune: 'pip', action: action, audibleOnly: audibleOnly, anyState: anyState });
+          return 'delegated';
+        }
+        return action === 'exit' ? 'none' : 'no-playing-video';
+      };
+
+      window.addEventListener('message', (e) => {
+        const d = e.data;
+        if (!d || d.__rune !== 'pip') return;
+        window.__runePiP(d.action, d.audibleOnly, d.anyState);
+      });
+
       // Right-click → tell native what's under the cursor, so the context menu
       // can repair WebKit's dead download
       // items. Fires once per right-click.
