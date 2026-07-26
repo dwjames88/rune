@@ -53,14 +53,24 @@ final class Updater: ObservableObject {
 
     func check(userInitiated: Bool = false) async {
         if case .checking = status { return }
-        status = .checking
+        // The quiet daily look shouldn't leave a status behind at all until it
+        // has something to say — a spinner nobody asked for is noise.
+        if userInitiated { status = .checking }
         do {
             let release = try await fetchLatest()
             let now = Date()
             lastChecked = now
             UserDefaults.standard.set(now.timeIntervalSince1970, forKey: Self.lastCheckKey)
-            status = isNewer(release.version, than: current) ? .available(release) : .upToDate
+            let newer = isNewer(release.version, than: current)
+            // A background check reports only good news: finding nothing new is
+            // the expected outcome, and "You're up to date" is an answer to a
+            // question you didn't ask.
+            if newer { status = .available(release) }
+            else if userInitiated { status = .upToDate }
         } catch {
+            // Offline on launch is not an error worth showing. Only a check you
+            // asked for gets to fail out loud.
+            guard userInitiated else { return }
             status = .failed((error as? LocalizedError)?.errorDescription ?? "Couldn't check for updates.")
         }
     }

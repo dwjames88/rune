@@ -117,7 +117,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let center = NotificationCenter.default
         center.addObserver(self, selector: #selector(buildMenu), name: .shortcutsChanged, object: nil)
         center.addObserver(self, selector: #selector(applyWindowChrome), name: .appearanceChanged, object: nil)
-        center.addObserver(self, selector: #selector(frontBrowserWindow), name: .frontBrowserWindow, object: nil)
         center.addObserver(forName: .glanceLink, object: nil, queue: .main) { [weak self] note in
             // Pull the URL out before hopping: a Notification isn't Sendable,
             // and a URL is.
@@ -277,10 +276,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     private var appliedIconChoice: String?
-
-    @objc private func frontBrowserWindow() {
-        window?.makeKeyAndOrderFront(nil)
-    }
 
     @objc private func applyWindowChrome() {
         for browser in browsers {

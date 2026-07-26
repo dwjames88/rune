@@ -557,7 +557,6 @@ extension Notification.Name {
     static let focusStartPage = Notification.Name("rune.focusStartPage")
     static let hoverSettingsChanged = Notification.Name("rune.hoverSettingsChanged")
     static let finderToast = Notification.Name("rune.finderToast")
-    static let frontBrowserWindow = Notification.Name("rune.frontBrowserWindow")
     static let showFindBar = Notification.Name("rune.showFindBar")
     static let showNewTabOverlay = Notification.Name("rune.showNewTabOverlay")
     /// Wiggle mode: the strip and corner kit start (or stop) taking edits.
