@@ -77,6 +77,7 @@ xcrun devicectl device process launch --device <udid> com.dwjames.Rune.ios
 | `history.json` | Browsing history (`HistoryEntry`) |
 | `shortcuts.json` | Keyboard shortcut overrides |
 | `sites.json` | Per-site zoom + content-blocking exceptions |
+| — | `settings.json` also carries `developerExtras` (Web Inspector) and `downloadDirectory` |
 | `Finder/` | **Retired.** The pre-v1.16 inspiration library. Nothing reads it any more; it was deliberately left on disk rather than deleted. |
 
 Web session (cookies/logins) lives in `WKWebsiteDataStore.default()`, per profile — that's
@@ -120,7 +121,8 @@ blocking + cookie-banner hiding · split view · panels · reader · find in pag
 glance/segment windows · bookmark import · deep appearance customization + presets ·
 Liquid Glass · customizable toolbar with wiggle mode + corner kit · **Zen Mode** (full and
 subtle, ⌃⌘Z) · **in-app update checks** · **alternate app icons** (drop a `.icon` bundle in
-`Assets/Icons`).
+`Assets/Icons`) · **Web Inspector** (Settings ▸ Browsing ▸ Developer, off by default) ·
+**History menu** listing recent pages · **downloads popover** on the toolbar button.
 
 **v1.16's big change:** the **Finder library window was removed**. The grab tools stayed —
 right-click, ⌥S, ⇧⌘S collect, Capture Page as Image — and all now land in your download
@@ -130,6 +132,19 @@ system Service and Quick Action, and the `finderItem` UTI.
 
 **Not started:** Apple Passwords (needs the AutoFill Credential Provider entitlement, which
 needs a **paid** Developer Program membership — the same thing notarization waits on).
+
+### Known gaps against other browsers (checked 2026-07-25)
+
+Closed this session: no Web Inspector at all (`isInspectable` defaults to false on every
+WKWebView — the single biggest omission), no way to browse history outside the palette, and
+no downloads list after the Finder window went. Still open, deliberately:
+
+- **Extensions.** Safari App Extensions need a paid Developer Program membership and a
+  separate target; Chrome's model isn't available to WKWebView at all.
+- **Password autofill.** Same blocker — the AutoFill Credential Provider entitlement.
+- **Sync.** The iOS app is hibernated (§9); CloudKit also waits on the Program.
+- **Spell/grammar UI.** WKWebView does spell-check editable fields itself; Rune adds no
+  Substitutions menu of its own.
 
 ## 6. Gotchas that will waste your time
 
