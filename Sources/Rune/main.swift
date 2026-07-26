@@ -8,7 +8,7 @@ app.setActivationPolicy(.regular)
 app.run()
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate {
     let settings = SettingsStore()
     let history = HistoryStore()
     let shortcuts = ShortcutStore()
@@ -316,6 +316,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             for command in Command.allCases where command.menu == section {
                 addCommandItem(command, to: sectionMenu)
             }
+            // The History menu is the one place a menu holds data rather than
+            // verbs: every browser lists where you've actually been under it,
+            // and Rune's history was reachable only by typing into the palette.
+            // It fills itself in on open (see `menuNeedsUpdate`) — built once
+            // at launch it would list where you'd been before you went there.
+            if section == .history {
+                sectionMenu.delegate = self
+                historyMenu = sectionMenu
+                addRecentHistory(to: sectionMenu)
+            }
             sectionItem.submenu = sectionMenu
             sectionItem.title = section.rawValue
             mainMenu.addItem(sectionItem)
@@ -335,6 +345,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         mainMenu.addItem(editItem)
 
         NSApp.mainMenu = mainMenu
+    }
+
+    /// The History menu, kept so its list can be refreshed when it opens.
+    private weak var historyMenu: NSMenu?
+
+    /// Every browser's History menu is current the moment you pull it down.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu === historyMenu else { return }
+        // Drop everything below the navigation commands and lay the list out
+        // again — cheap at fifteen rows, and always right.
+        while let last = menu.items.last, last.tag == Self.historyItemTag {
+            menu.removeItem(last)
+        }
+        addRecentHistory(to: menu)
+    }
+
+    private static let historyItemTag = 0x52554E48   // 'RUNH'
+
+    /// Recently visited pages, newest first, under the History menu — with a
+    /// way to clear them.
+    private func addRecentHistory(to menu: NSMenu) {
+        let recent = history.entries
+            .sorted { $0.lastVisited > $1.lastVisited }
+            .prefix(15)
+        guard !recent.isEmpty else { return }
+        let separator = NSMenuItem.separator()
+        separator.tag = Self.historyItemTag
+        menu.addItem(separator)
+        let header = NSMenuItem(title: "Recently Visited", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        header.tag = Self.historyItemTag
+        menu.addItem(header)
+        for entry in recent {
+            let name = entry.title.isEmpty ? entry.url : entry.title
+            let item = NSMenuItem(title: String(name.prefix(70)),
+                                  action: #selector(openHistoryEntry(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = entry.url
+            item.toolTip = entry.url
+            item.tag = Self.historyItemTag
+            menu.addItem(item)
+        }
+        let tail = NSMenuItem.separator()
+        tail.tag = Self.historyItemTag
+        menu.addItem(tail)
+        let clear = NSMenuItem(title: "Clear History…", action: #selector(clearHistory),
+                               keyEquivalent: "")
+        clear.target = self
+        clear.tag = Self.historyItemTag
+        menu.addItem(clear)
+    }
+
+    @objc private func openHistoryEntry(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let url = URL(string: raw) else { return }
+        frontModel.newTab(url: url)
+        window?.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func clearHistory() {
+        let alert = NSAlert()
+        alert.messageText = "Clear browsing history?"
+        alert.informativeText = "\(history.entries.count) pages will be forgotten. Favorites, pinned tabs and saved sessions are untouched."
+        alert.addButton(withTitle: "Clear")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons.first?.hasDestructiveAction = true
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        history.clear()
     }
 
     private func addCommandItem(_ command: Command, to menu: NSMenu) {

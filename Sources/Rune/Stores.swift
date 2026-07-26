@@ -287,6 +287,11 @@ final class SettingsStore: ObservableObject {
     /// Every save Rune makes (downloads, grabbed images, page captures)
     /// resolves through this.
     @Published var downloadDirectory: String? { didSet { save() } }
+    /// Web Inspector on every page (⌥⌘I, and Inspect Element in the context
+    /// menu). Off by default, like Safari's Develop menu: WKWebView ships with
+    /// `isInspectable = false`, so without this a browser built on it has no
+    /// developer tools at all.
+    @Published var developerExtras: Bool { didSet { save(); developerChanged() } }
     /// Reopen last session's tabs on launch. Off by design: session tabs are
     /// meant to be disposable, but that should be your call, not ours.
     @Published var restoreSession: Bool { didSet { save() } }
@@ -308,6 +313,7 @@ final class SettingsStore: ObservableObject {
         var finderMinCollectSize: Double?
         var downloadLocation: DownloadLocation?
         var downloadDirectory: String?
+        var developerExtras: Bool?
         var restoreSession: Bool?
         var aiModel: AIModel?
         var blockContent: Bool?
@@ -332,6 +338,7 @@ final class SettingsStore: ObservableObject {
         finderMinCollectSize = saved?.finderMinCollectSize ?? 200
         downloadLocation = saved?.downloadLocation ?? .downloadsFolder
         downloadDirectory = saved?.downloadDirectory
+        developerExtras = saved?.developerExtras ?? false
         restoreSession = saved?.restoreSession ?? false
         aiModel = saved?.aiModel ?? .onDevice
         externalLinks = saved?.externalLinks ?? .segment
@@ -352,7 +359,8 @@ final class SettingsStore: ObservableObject {
                                  linkHoverEnabled: linkHoverEnabled, linkHoverDelay: linkHoverDelay,
                                  finderMinCollectSize: finderMinCollectSize,
                                  downloadLocation: downloadLocation,
-                                 downloadDirectory: downloadDirectory, restoreSession: restoreSession,
+                                 downloadDirectory: downloadDirectory,
+                                 developerExtras: developerExtras, restoreSession: restoreSession,
                                  aiModel: aiModel, blockContent: blockContent,
                                  hideCookieBanners: hideCookieBanners,
                                  externalLinks: externalLinks,
@@ -363,6 +371,9 @@ final class SettingsStore: ObservableObject {
     func flush() { writer.flush() }
     private func hoverChanged() {
         NotificationCenter.default.post(name: .hoverSettingsChanged, object: nil)
+    }
+    private func developerChanged() {
+        NotificationCenter.default.post(name: .developerExtrasChanged, object: nil)
     }
     private func blockingChanged() {
         NotificationCenter.default.post(name: .blockingSettingsChanged, object: nil)
@@ -564,6 +575,7 @@ extension Notification.Name {
     /// Open the Finder window already turned to its Downloads section.
     static let glanceLink = Notification.Name("rune.glanceLink")
     static let blockingSettingsChanged = Notification.Name("rune.blockingSettingsChanged")
+    static let developerExtrasChanged = Notification.Name("rune.developerExtrasChanged")
     /// A left click landed on a page. Address bars listen and let focus go —
     /// clicking the web is leaving the field.
     static let pageClicked = Notification.Name("rune.pageClicked")

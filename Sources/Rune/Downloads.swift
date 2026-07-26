@@ -248,19 +248,27 @@ final class DownloadStore: ObservableObject {
 // MARK: - UI
 
 /// Toolbar button: a tray icon that becomes a progress ring while files are in
-/// flight, with a dot when something finished you haven't looked at.
-/// Pressing it opens the download folder — Rune saves there and gets out
-/// of the way; this ring is the in-flight progress.
+/// flight, with a dot when something finished you haven't looked at. Pressing
+/// it drops the list of this launch's downloads — the one bit of the retired
+/// Finder window worth keeping, because a download that fails or gets cancelled
+/// has nowhere else to say so, and no other way to be tried again.
 struct DownloadsButton: View {
     @ObservedObject var downloads: DownloadStore
     /// On glass (the corner kit) it inks with the semantic label colour so it
     /// matches the other icons; on the solid chrome bar it keeps chrome ink.
     var onGlass = false
+    /// What ⌥⌘L does: open the folder itself. The list offers it too.
     let action: () -> Void
     @EnvironmentObject var appearance: AppearanceStore
+    @State private var showList = false
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            // Nothing has been fetched yet this launch — skip the empty list
+            // and go straight where the files live.
+            if downloads.items.isEmpty { action() } else { showList = true }
+            downloads.hasUnseen = false
+        } label: {
             ZStack {
                 Image(systemName: "arrow.down.circle")
                     .font(.system(size: 13, weight: .medium))
@@ -283,7 +291,92 @@ struct DownloadsButton: View {
         .buttonStyle(.plain)
         .foregroundStyle(onGlass ? AnyShapeStyle(.secondary)
                                  : AnyShapeStyle(appearance.secondaryText(on: appearance.chrome)))
-        .help("Downloads (⌥⌘L)")
+        .help("Downloads — ⌥⌘L opens the folder")
+        .popover(isPresented: $showList, arrowEdge: .bottom) {
+            DownloadsPopover(downloads: downloads, openFolder: action)
+                .environmentObject(appearance)
+        }
+    }
+}
+
+/// This launch's downloads: what arrived, what's still coming, and what
+/// didn't make it. Deliberately small — the folder is the real archive, and
+/// there's a button here to go there.
+struct DownloadsPopover: View {
+    @ObservedObject var downloads: DownloadStore
+    let openFolder: () -> Void
+    @EnvironmentObject var appearance: AppearanceStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ScrollView {
+                VStack(spacing: 2) {
+                    ForEach(downloads.items) { DownloadRow(item: $0) }
+                }
+                .padding(8)
+            }
+            .frame(maxHeight: 260)
+
+            Divider()
+            HStack {
+                Button("Open Download Folder", action: openFolder)
+                Spacer()
+                if downloads.items.contains(where: { !$0.isRunning }) {
+                    Button("Clear") { downloads.clearFinished() }
+                }
+            }
+            .font(.system(size: 11))
+            .padding(.horizontal, 10).padding(.vertical, 7)
+        }
+        .frame(width: 320)
+    }
+}
+
+/// One download: what it is, how far along, and the verb it needs — cancel
+/// while it runs, reveal once it lands.
+private struct DownloadRow: View {
+    @ObservedObject var item: DownloadItem
+    @EnvironmentObject var appearance: AppearanceStore
+
+    private var icon: String {
+        switch item.state {
+        case .running: "arrow.down.circle"
+        case .finished: "doc"
+        case .failed: "exclamationmark.triangle"
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: icon).font(.system(size: 14))
+                .foregroundStyle(item.state == .running ? AnyShapeStyle(appearance.accent)
+                                                        : AnyShapeStyle(.secondary))
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.filename).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
+                if item.isRunning {
+                    if let fraction = item.fraction {
+                        ProgressView(value: fraction).progressViewStyle(.linear).tint(appearance.accent)
+                    } else {
+                        ProgressView().progressViewStyle(.linear).tint(appearance.accent)
+                    }
+                }
+                Text(item.sizeLabel).font(.system(size: 10)).foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            if item.isRunning {
+                Button { item.cancel() } label: { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.plain).help("Cancel").foregroundStyle(.secondary)
+            } else if item.state == .finished, item.destination != nil {
+                Button { item.reveal() } label: { Image(systemName: "magnifyingglass.circle") }
+                    .buttonStyle(.plain).help("Show in Finder").foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 6).padding(.vertical, 5)
+        .contentShape(Rectangle())
+        // A finished file opens on click; anything else has nothing to open.
+        .onTapGesture { if item.state == .finished { item.open() } }
     }
 }
 /// The quiet word from the corner while bytes land: one card, bottom-left,
