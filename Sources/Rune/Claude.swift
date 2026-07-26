@@ -124,7 +124,7 @@ enum ClaudeError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .noKey: "Add your Anthropic API key in Settings ▸ Claude."
+        case .noKey: "Add your Anthropic API key in Settings ▸ AI."
         case .badResponse: "Unexpected response from the API."
         case .empty: "Claude returned no text."
         case .refused: "Claude declined this request."
