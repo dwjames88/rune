@@ -228,74 +228,64 @@ final class Tab: ObservableObject, Identifiable {
     // without transient user activation. Keep the W3C call as a fallback in
     // case WebKit ever ships it.
 
-    private static func enterPiPJS(audibleOnly: Bool) -> String { """
-    (function(){
-      const vids=[...document.querySelectorAll('video')];
-      if(vids.some(v=>v.webkitPresentationMode==='picture-in-picture')||document.pictureInPictureElement){return 'already-pip';}
-      const playing=v=>!v.paused&&!v.ended&&v.readyState>2;
-      const audible=v=>!v.muted&&v.volume>0;
-      const v=\(audibleOnly ? "vids.find(v=>playing(v)&&audible(v))"
-                            : "vids.find(v=>playing(v)&&audible(v))||vids.find(playing)");
-      if(!v){return 'no-playing-video';}
-      if(v.webkitSupportsPresentationMode&&v.webkitSupportsPresentationMode('picture-in-picture')){
-        v.webkitSetPresentationMode('picture-in-picture');return 'webkit';
-      }
-      if(document.pictureInPictureEnabled&&v.requestPictureInPicture){
-        v.requestPictureInPicture().catch(e=>{});return 'w3c';
-      }
-      return 'unsupported';
-    })();
-    """ }
-
-    private static let exitPiPJS = """
-    (function(){
-      const v=[...document.querySelectorAll('video')].find(v=>v.webkitPresentationMode==='picture-in-picture');
-      if(v){v.webkitSetPresentationMode('inline');return 'webkit';}
-      if(document.pictureInPictureElement){document.exitPictureInPicture().catch(e=>{});return 'w3c';}
-      return 'none';
-    })();
-    """
+    /// Every PiP request goes through the bridge helper, which lives in every
+    /// frame — so a player inside an iframe is reachable, which it isn't from
+    /// a plain `evaluateJavaScript` (main frame only). See PageBridge.
+    private func pip(_ action: String, audibleOnly: Bool = true, anyState: Bool = false,
+                     log: String, notify: Bool = false) {
+        let js = "window.__runePiP ? window.__runePiP('\(action)', \(audibleOnly), \(anyState)) : 'no-bridge'"
+        webView.evaluateJavaScript(js) { result, error in
+            if let error {
+                NSLog("Rune PiP %@ failed: %@", log, error.localizedDescription)
+                return
+            }
+            let outcome = result as? String ?? "?"
+            NSLog("Rune PiP %@: %@", log, outcome)
+            // Only a toggle you asked for reports back, and only when it
+            // couldn't do the thing — an automatic attempt that finds no video
+            // is the normal case on most pages, not news.
+            guard notify else { return }
+            let complaint: String?
+            switch outcome {
+            case "no-playing-video": complaint = "No video on this page"
+            case "unsupported": complaint = "This video can't go into Picture in Picture"
+            case "no-bridge": complaint = "Nothing to put in Picture in Picture yet"
+            // 'delegated' means a frame further down was asked and answers on
+            // its own schedule; claiming failure here would be a lie.
+            default: complaint = nil
+            }
+            if let complaint {
+                NotificationCenter.default.post(name: .finderToast, object: complaint)
+            }
+        }
+    }
 
     /// The automatic path is picky on purpose: autoplay heroes and hover
     /// previews are forced to start muted, so a video with sound is the one
     /// you actually chose to watch. With `audibleOnly` off, sound still only
     /// breaks the tie between several playing videos.
+    ///
+    /// The outcome is logged like the manual toggle's. It used to be discarded,
+    /// which meant the automatic path could fail on every site that keeps its
+    /// player in an iframe and say nothing at all about why.
     func requestPiPIfPlaying(audibleOnly: Bool) {
-        webView.evaluateJavaScript(Self.enterPiPJS(audibleOnly: audibleOnly)) { _, error in
-            if let error { NSLog("Rune PiP enter failed: %@", error.localizedDescription) }
-        }
+        pip("enter", audibleOnly: audibleOnly, log: "auto-enter")
     }
 
     /// Bring a PiP'd video back into the page (used when its tab is reselected).
     func exitPiPIfActive() {
-        webView.evaluateJavaScript(Self.exitPiPJS) { _, error in
-            if let error { NSLog("Rune PiP exit failed: %@", error.localizedDescription) }
-        }
+        pip("exit", log: "auto-exit")
     }
 
     /// Manual toggle: exit if a video is in PiP, otherwise send one there.
-    /// Unlike the automatic path, a paused video qualifies too, and the outcome
-    /// is logged — a manual toggle that does nothing is worth diagnosing.
+    /// Unlike the automatic path a paused video qualifies too — you asked.
     func togglePiP() {
-        webView.evaluateJavaScript("""
-        (function(){
-          const vids=[...document.querySelectorAll('video')];
-          const active=vids.find(v=>v.webkitPresentationMode==='picture-in-picture');
-          if(active){active.webkitSetPresentationMode('inline');return 'exited';}
-          if(document.pictureInPictureElement){document.exitPictureInPicture().catch(e=>{});return 'exited';}
-          const v=vids.find(v=>!v.paused&&!v.ended&&v.readyState>2)||vids.find(v=>v.readyState>2);
-          if(!v){return 'no-video';}
-          if(v.webkitSupportsPresentationMode&&v.webkitSupportsPresentationMode('picture-in-picture')){
-            v.webkitSetPresentationMode('picture-in-picture');return 'entered';
-          }
-          if(document.pictureInPictureEnabled&&v.requestPictureInPicture){
-            v.requestPictureInPicture().catch(e=>{});return 'entered';
-          }
-          return 'unsupported';
-        })();
-        """) { result, error in
-            if let error { NSLog("Rune PiP toggle failed: %@", error.localizedDescription) }
-            else { NSLog("Rune PiP toggle: %@", result as? String ?? "?") }
+        webView.evaluateJavaScript("window.__runePiP ? window.__runePiP('exit', true, false) : 'no-bridge'") { [weak self] result, _ in
+            // Nothing was in PiP, so this is a request to put something there.
+            let exited = (result as? String).map { $0 != "none" && $0 != "no-bridge" } ?? false
+            guard !exited else { NSLog("Rune PiP toggle: exited"); return }
+            self?.pip("enter", audibleOnly: false, anyState: true,
+                      log: "toggle-enter", notify: true)
         }
     }
 }

@@ -30,7 +30,14 @@ scripts/dev-run.sh            # macOS debug: build → bundle .app → codesign 
 scripts/dev-run.sh release
 scripts/package.sh            # release build → dist/Rune.app → dist/Rune.zip
 scripts/ios-run.sh            # iOS: build → bare .app → install + launch in the simulator
+scripts/test-pip.sh           # headless: PiP video-selection logic against a stubbed DOM
 ```
+
+`test-pip.sh` is the one automated test so far. It pulls the injected script out
+of `PageBridge.swift`, fills in the Swift interpolations, and runs it under
+`jsc` (which ships with macOS — no node, no dependency). It needs no window and
+no network, so it's safe to run while someone is using the Mac. Exit code is
+non-zero on failure; verified by breaking a rule on purpose.
 
 **`swift run` will not work** — WKWebView needs a real `.app` bundle (bundle identifier) to
 start its web content process. `dev-run.sh` assembles `.build/Rune.app`, writes the
