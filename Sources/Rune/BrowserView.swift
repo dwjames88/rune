@@ -120,12 +120,12 @@ private struct Sidebar: View {
             // instead: this sidebar is a hover-reveal floating over the page,
             // and a second set of lights there would be two of one window.
             if !model.zenActive {
-                HStack(spacing: 8) {
+                HStack(spacing: appearance.space(.base)) {
                     if !appearance.appearance.hideTrafficLights { TrafficLights() }
                     CommandButton(model: model, command: .toggleSidebar, dispatch: dispatch)
                 }
                 .padding(.leading, appearance.appearance.hideTrafficLights ? 6 : 12)
-                .padding(.top, 8).padding(.bottom, 4)
+                .padding(.top, appearance.space(.base)).padding(.bottom, appearance.space(.tight))
             } else {
                 Color.clear.frame(height: 10)
             }
@@ -142,14 +142,14 @@ private struct Sidebar: View {
                     }
                     SessionSection(model: model)
                 }
-                .padding(.horizontal, 8).padding(.top, 4)
+                .padding(.horizontal, appearance.space(.base)).padding(.top, appearance.space(.tight))
             }
 
             Spacer(minLength: 0)
             Button { model.newTab() } label: {
                 Label("New Tab", systemImage: "plus").font(appearance.font(13))
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 8).padding(.vertical, 7)
+                    .padding(.horizontal, appearance.space(.base)).padding(.vertical, 7)
             }
             .buttonStyle(.plain)
             .foregroundStyle(appearance.sidebarSecondary).padding(8)
@@ -168,7 +168,7 @@ private struct Sidebar: View {
     /// Says plainly what this window is and what it doesn't keep. A private
     /// window has no favorites and no pinned rows, so there's room for it.
     private var privateBanner: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: appearance.space(.snug)) {
             Image(systemName: "eyeglasses").font(.system(size: 11))
             VStack(alignment: .leading, spacing: 1) {
                 Text("Private").font(appearance.font(12, weight: .semibold))
@@ -176,11 +176,11 @@ private struct Sidebar: View {
                     .foregroundStyle(appearance.sidebarSecondary)
             }
         }
-        .padding(.horizontal, 10).padding(.vertical, 7)
+        .padding(.horizontal, appearance.space(.gap)).padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: appearance.cornerRadius)
             .fill(appearance.accent.opacity(0.16)))
-        .padding(.horizontal, 8).padding(.bottom, 6)
+        .padding(.horizontal, appearance.space(.base)).padding(.bottom, appearance.space(.snug))
     }
 }
 
@@ -200,7 +200,7 @@ private struct SpaceBar: View {
 
     var body: some View {
         if model.spaces.count > 1 {
-            HStack(spacing: 4) {
+            HStack(spacing: appearance.space(.tight)) {
                 ForEach(model.spaces) { space in
                     SpaceChip(space: space, current: space.id == model.currentSpaceID)
                         .onTapGesture { model.switchTo(space: space.id) }
@@ -222,14 +222,14 @@ private struct SpaceBar: View {
                         }
                 }
                 Button { model.switchTo(space: model.addSpace().id) } label: {
-                    Image(systemName: "plus").font(.system(size: 10, weight: .medium))
+                    Image(systemName: "plus").font(appearance.glyph(.small))
                         .frame(width: 22, height: 22)
                 }
                 .buttonStyle(.plain).help("New Space")
                 Spacer(minLength: 0)
             }
             .foregroundStyle(appearance.sidebarSecondary)
-            .padding(.horizontal, 8).padding(.bottom, 6)
+            .padding(.horizontal, appearance.space(.base)).padding(.bottom, appearance.space(.snug))
         }
     }
 }
@@ -259,12 +259,12 @@ private struct FavoritesSection: View {
     @State private var targeted = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: appearance.space(.tight)) {
             SectionHeader(title: "Favorites", trailing: "\(model.favorites.count)/6")
             // A fixed row, not a flexible grid: the tiles and their gaps stay
             // the same size at every sidebar width, and a sidebar too narrow
             // for them truncates the row rather than squeezing it.
-            HStack(spacing: 6) {
+            HStack(spacing: appearance.space(.snug)) {
                 ForEach(Array(model.favorites.enumerated()), id: \.element.id) { index, fav in
                     FaviconTile(saved: fav, selected: model.pane(showing: .saved(fav.id)) != nil)
                         .onTapGesture { model.select(.saved(fav.id)) }
@@ -328,7 +328,7 @@ private struct PinnedSection: View {
     @State private var targeted = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: appearance.space(.hair)) {
             HStack {
                 SectionHeader(title: "Pinned")
                 Spacer()
@@ -341,10 +341,10 @@ private struct PinnedSection: View {
             }
             if model.pinned.isEmpty && model.folders.isEmpty {
                 Text("Drag a tab here to pin it.").font(appearance.font(11))
-                    .foregroundStyle(appearance.sidebarSecondary).padding(.leading, 8).padding(.vertical, 4)
+                    .foregroundStyle(appearance.sidebarSecondary).padding(.leading, appearance.space(.base)).padding(.vertical, appearance.space(.tight))
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, appearance.space(.hair))
         .background(RoundedRectangle(cornerRadius: appearance.cornerRadius)
             .fill(targeted ? appearance.accent.opacity(0.12) : .clear))
         .dropDestination(for: TabDrag.self) { items, _ in
@@ -366,15 +366,15 @@ private struct FolderView: View {
     private var tint: Color { folder.colorHex.flatMap(Color.init(hex:)) ?? appearance.accent }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: appearance.space(.hair)) {
+            HStack(spacing: appearance.space(.snug)) {
                 Image(systemName: folder.collapsed ? "chevron.right" : "chevron.down")
                     .font(.system(size: 9)).foregroundStyle(appearance.sidebarSecondary).frame(width: 10)
                 FolderGlyph(icon: folder.icon, tint: tint, size: 12)
                 Text(folder.name).font(appearance.font(12, weight: .medium))
                 Spacer()
             }
-            .padding(.horizontal, 8).padding(.vertical, 5)
+            .padding(.horizontal, appearance.space(.base)).padding(.vertical, 5)
             .background(RoundedRectangle(cornerRadius: appearance.cornerRadius)
                 .fill(targeted ? tint.opacity(0.22) : .clear))
             .contentShape(Rectangle())
@@ -432,7 +432,7 @@ private struct SessionSection: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: appearance.space(.hair)) {
             SectionHeader(title: "Tabs")
             ForEach(rows) { row in
                 switch row {
@@ -443,7 +443,7 @@ private struct SessionSection: View {
                 }
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, appearance.space(.hair))
         .background(RoundedRectangle(cornerRadius: appearance.cornerRadius)
             .fill(targeted ? appearance.accent.opacity(0.12) : .clear))
         .dropDestination(for: TabDrag.self) { items, _ in
@@ -565,7 +565,7 @@ private struct SplitRow: View {
             Rectangle().fill(appearance.hairline).frame(width: 1, height: 16)
             half(secondary, pane: .secondary)
         }
-        .padding(.horizontal, 2)
+        .padding(.horizontal, appearance.space(.hair))
         .frame(height: 30)
         .background(RoundedRectangle(cornerRadius: appearance.cornerRadius).fill(appearance.selection))
     }
@@ -611,7 +611,7 @@ private struct RowBody<Icon: View, Trailing: View>: View {
     @EnvironmentObject var appearance: AppearanceStore
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: appearance.space(.base)) {
             icon()
             Text(name).lineLimit(1).font(appearance.type(.body))
             Spacer(minLength: 4)
@@ -624,7 +624,7 @@ private struct RowBody<Icon: View, Trailing: View>: View {
             }
             trailing()
         }
-        .padding(.horizontal, 8).frame(height: 30)
+        .padding(.horizontal, appearance.space(.base)).frame(height: 30)
         .background(RoundedRectangle(cornerRadius: appearance.cornerRadius)
             .fill(selected ? appearance.selection : (hovering ? appearance.hover : .clear)))
         .contentShape(Rectangle())
@@ -700,15 +700,9 @@ private struct SectionHeader: View {
     var trailing: String? = nil
     @EnvironmentObject var appearance: AppearanceStore
     var body: some View {
-        // Micro-labels, fieldframes-style: tiny, tracked wide, all caps, with
-        // the count sitting quietly at the trailing edge. The hierarchy is the
-        // whitespace around them, not their weight.
-        HStack {
-            Text(title.uppercased()).font(appearance.type(.caption)).tracking(1.3)
-            if let trailing { Spacer(); Text(trailing).font(appearance.type(.caption)).monospacedDigit() }
-        }
-        .foregroundStyle(appearance.sidebarSecondary.opacity(0.85))
-        .padding(.horizontal, 8)
+        // Fieldframes-style micro-labels — the shared component, so the
+        // sidebar and anything else that names a group speak with one voice.
+        SectionLabel(title: title, trailing: trailing)
     }
 }
 
@@ -801,8 +795,8 @@ private struct CustomizeFolderPopover: View {
     private var tint: Color { folder?.colorHex.flatMap(Color.init(hex:)) ?? appearance.accent }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: appearance.space(.gap)) {
+            HStack(spacing: appearance.space(.base)) {
                 FolderGlyph(icon: folder?.icon ?? "folder.fill", tint: tint, size: 16)
                 Text("Customize Folder").font(.headline)
             }
@@ -849,6 +843,8 @@ struct RenamePopover: View {
     }
 
     var body: some View {
+        // No appearance here on purpose: this popover is presented from three
+        // places and leans on system styling, so it takes no store.
         VStack(alignment: .leading, spacing: 10) {
             Text(title).font(.headline)
             TextField("Name", text: $draft)
@@ -1000,13 +996,13 @@ private struct ContentArea: View {
                 }
                 if showFind {
                     FindBar(model: model, isPresented: $showFind)
-                        .padding(.top, 8).padding(.trailing, 12)
+                        .padding(.top, appearance.space(.base)).padding(.trailing, appearance.space(.roomy))
                         .frame(maxWidth: .infinity, alignment: .trailing)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
                 if let candidates = model.collectCandidates {
                     CollectSheet(model: model, candidates: candidates)
-                        .padding(.top, 24)
+                        .padding(.top, appearance.space(.section))
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
                 // The dropdown is the bar grown taller: full width, wearing
@@ -1026,9 +1022,9 @@ private struct ContentArea: View {
                     Text(toast)
                         .font(appearance.type(.label))
                         .foregroundStyle(appearance.chromeText)
-                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .padding(.horizontal, 14).padding(.vertical, appearance.space(.base))
                         .runeSurface(appearance, .pill)
-                        .padding(.top, 10)
+                        .padding(.top, appearance.space(.gap))
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
@@ -1036,7 +1032,7 @@ private struct ContentArea: View {
                 if floatingChrome {
                     CornerToolbar(model: model, downloads: model.downloads,
                                   dispatch: dispatch, editing: $controlEdit)
-                        .padding(.trailing, 12).padding(.bottom, 12)
+                        .padding(.trailing, appearance.space(.roomy)).padding(.bottom, appearance.space(.roomy))
                 }
             }
             // The quiet corner opposite: download progress while bytes land.
@@ -1192,7 +1188,7 @@ struct AddressField: View {
     }
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: appearance.space(.snug)) {
             // The padlock answers questions when there's a connection to ask
             // about; otherwise it's just the glyph.
             if !address.isEmpty, !focused.wrappedValue, address.hasPrefix("http") {
@@ -1277,8 +1273,8 @@ struct SecurityPopover: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: appearance.space(.gap)) {
+            HStack(spacing: appearance.space(.base)) {
                 Image(systemName: secure ? "lock.fill" : "lock.open")
                     .foregroundStyle(secure ? appearance.accent : .orange)
                 Text(host).font(appearance.type(.title)).lineLimit(1)
@@ -1288,7 +1284,7 @@ struct SecurityPopover: View {
                     .font(appearance.type(.body)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if !chain.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: appearance.space(.tight)) {
                         Text("CERTIFICATE CHAIN").font(appearance.type(.caption)).tracking(1.2)
                             .foregroundStyle(.secondary)
                         ForEach(Array(chain.enumerated()), id: \.offset) { i, name in
@@ -1322,7 +1318,7 @@ struct SecurityInterstitial: View {
     @EnvironmentObject var appearance: AppearanceStore
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: appearance.space(.roomy)) {
             Spacer()
             Image(systemName: "lock.trianglebadge.exclamationmark")
                 .font(.system(size: 40))
@@ -1339,7 +1335,7 @@ struct SecurityInterstitial: View {
                 .frame(maxWidth: 420)
             Button("Go Back", action: goBack)
                 .buttonStyle(.borderedProminent).tint(appearance.accent)
-                .padding(.top, 6)
+                .padding(.top, appearance.space(.snug))
             Text("macOS couldn't verify this site's certificate. Rune never proceeds past a failed check.")
                 .font(appearance.type(.caption))
                 .foregroundStyle(appearance.secondaryText(on: appearance.windowBG))
@@ -1445,14 +1441,14 @@ private struct SuggestionList: View {
                             .frame(maxWidth: 260, alignment: .trailing)
                     }
                 }
-                .padding(.horizontal, 10).padding(.vertical, 7)
+                .padding(.horizontal, appearance.space(.gap)).padding(.vertical, 7)
                 .background(RoundedRectangle(cornerRadius: appearance.radius(.small))
                     .fill(on ? appearance.accent : .clear))
                 .contentShape(Rectangle())
                 .onTapGesture { pick(index) }
             }
         }
-        .padding(.horizontal, 8).padding(.top, 5).padding(.bottom, 7)
+        .padding(.horizontal, appearance.space(.base)).padding(.top, 5).padding(.bottom, 7)
         .frame(maxWidth: .infinity)
         .background {
             ZStack {
@@ -1553,7 +1549,7 @@ private struct Pane: View {
                             focused: $focused, highlighted: $highlighted,
                             suggestionCount: suggestions.count, activate: activate)
                 } else {
-                    HStack(spacing: 6) {
+                    HStack(spacing: appearance.space(.snug)) {
                         AddressField(address: $address, focused: $focused, highlighted: $highlighted,
                                      suggestionCount: suggestions.count, activate: activate,
                                      trust: { model.tab(for: pane)?.serverTrust })
@@ -1561,14 +1557,14 @@ private struct Pane: View {
                         // a way out of the split.
                         if floating {
                             Button { model.closePane(pane) } label: {
-                                Image(systemName: "xmark").font(.system(size: 11, weight: .medium))
+                                Image(systemName: "xmark").font(appearance.glyph(.medium))
                                     .frame(width: 22, height: 22).contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                             .foregroundStyle(appearance.secondaryText(on: appearance.chrome))
                         }
                     }
-                    .padding(.horizontal, 8).padding(.vertical, 5)
+                    .padding(.horizontal, appearance.space(.base)).padding(.vertical, 5)
                     .background {
                         ZStack {
                             WindowDragArea()
@@ -1665,7 +1661,7 @@ private struct PaneBar: View {
     private var surface: Color { tab.themeColor.map(Color.init(nsColor:)) ?? appearance.chrome }
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: appearance.space(.tight)) {
             button("chevron.left", enabled: tab.canGoBack) { tab.webView.goBack() }
             button("chevron.right", enabled: tab.canGoForward) { tab.webView.goForward() }
             button("arrow.clockwise", enabled: true) { tab.webView.reload() }
@@ -1679,7 +1675,7 @@ private struct PaneBar: View {
                          trust: { tab.serverTrust })
                 .frame(maxWidth: 360)
         }
-        .padding(.horizontal, 6)
+        .padding(.horizontal, appearance.space(.snug))
         .frame(height: 34)
         .background {
             ZStack {
@@ -1698,7 +1694,7 @@ private struct PaneBar: View {
             model.focusedPane = pane
             action()
         } label: {
-            Image(systemName: symbol).font(.system(size: 11, weight: .medium))
+            Image(systemName: symbol).font(appearance.glyph(.medium))
                 .frame(width: 22, height: 22).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1791,7 +1787,7 @@ private struct StartPage: View {
             Text(greeting).font(appearance.font(40, weight: .semibold))
                 .lineLimit(1).minimumScaleFactor(0.4)
                 .foregroundStyle(appearance.text(on: appearance.startPageBG).opacity(0.85))
-            HStack(spacing: 8) {
+            HStack(spacing: appearance.space(.base)) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(appearance.secondaryText(on: appearance.chrome))
                 TextField("Search \(model.settings.searchEngine.name) or enter address", text: $query)
@@ -1815,14 +1811,14 @@ private struct StartPage: View {
                         }
                     }
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 64, maximum: 84), spacing: 14)],
-                              spacing: 12) {
+                              spacing: appearance.space(.roomy)) {
                         ForEach(model.favorites) { fav in
                             StartPageTile(saved: fav) { model.select(.saved(fav.id)) }
                         }
                     }
                 }
                 .frame(maxWidth: 560)
-                .padding(.top, 8)
+                .padding(.top, appearance.space(.base))
             }
             // The first sixty seconds: two hints for a profile that has never
             // browsed. History's first entry retires them for good.
@@ -1830,31 +1826,31 @@ private struct StartPage: View {
                 Text("⌘K runs any command · ⌘T opens the address bar · drag a tab onto the shelf to pin it")
                     .font(appearance.type(.caption)).tracking(0.4)
                     .foregroundStyle(appearance.secondaryText(on: appearance.startPageBG))
-                    .padding(.top, 2)
+                    .padding(.top, appearance.space(.hair))
             }
             if a.startPageShowRecents && !recents.isEmpty {
-                VStack(spacing: 2) {
+                VStack(spacing: appearance.space(.hair)) {
                     ForEach(recents) { entry in
                         Button { model.navigate(entry.url) } label: {
-                            HStack(spacing: 8) {
+                            HStack(spacing: appearance.space(.base)) {
                                 Image(systemName: "clock").font(.system(size: 11))
                                     .foregroundStyle(appearance.secondaryText(on: appearance.startPageBG))
                                 Text(entry.title.isEmpty ? entry.url : entry.title).lineLimit(1)
                                     .foregroundStyle(appearance.text(on: appearance.startPageBG).opacity(0.8))
                                 Spacer(minLength: 0)
                             }
-                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .padding(.horizontal, appearance.space(.gap)).padding(.vertical, 5)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }
                 }
                 .frame(maxWidth: 560)
-                .padding(.top, 4)
+                .padding(.top, appearance.space(.tight))
             }
             Spacer(); Spacer()
         }
-        .padding(.horizontal, 24)
+        .padding(.horizontal, appearance.space(.section))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(appearance.startPageBG.opacity(appearance.containerOpacity))
         .onAppear { focused = true; refreshRecents() }
@@ -1875,7 +1871,7 @@ private struct StartPageTile: View {
 
     var body: some View {
         Button(action: open) {
-            VStack(spacing: 6) {
+            VStack(spacing: appearance.space(.snug)) {
                 Group {
                     if let png = saved.faviconPNG, let image = FaviconCache.image(for: png) {
                         Image(nsImage: image).resizable().scaledToFit().frame(width: 24, height: 24)
@@ -1914,7 +1910,7 @@ private struct Toolbar: View {
     }
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: appearance.space(.base)) {
             ForEach(commands) { CommandButton(model: model, command: $0, dispatch: dispatch) }
 
             if !model.isSplit {
@@ -1928,7 +1924,7 @@ private struct Toolbar: View {
                 Spacer(minLength: 0)
             }
         }
-        .padding(.horizontal, 10).padding(.vertical, 7)
+        .padding(.horizontal, appearance.space(.gap)).padding(.vertical, 7)
         .background {
             ZStack {
                 WindowDragArea()
@@ -1958,7 +1954,9 @@ private struct CommandButton: View {
     var body: some View {
         switch command {
         case .showDownloads:
-            DownloadsButton(downloads: model.downloads, onGlass: onGlass) { dispatch(command) }
+            DownloadsButton(downloads: model.downloads, onGlass: onGlass,
+                            action: { dispatch(command) },
+                            retry: { model.retryDownload($0) })
         case .goBack, .goForward, .reload:
             // These read the active tab's live state, so they must OBSERVE it:
             // back/forward-cache restores don't fire `didCommit`, and this
@@ -1976,12 +1974,11 @@ private struct CommandButton: View {
     }
 
     private func button(_ symbol: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 13, weight: .medium)).frame(width: 26, height: 24)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(onGlass ? AnyShapeStyle(.secondary)
-                                 : AnyShapeStyle(appearance.secondaryText(on: surface ?? appearance.chrome)))
+        // The shared chrome button; the ink is this shelf's business, and
+        // foregroundStyle is inherited, so it goes on the outside.
+        IconButton(symbol: symbol, action: action)
+            .foregroundStyle(onGlass ? AnyShapeStyle(.secondary)
+                                     : AnyShapeStyle(appearance.secondaryText(on: surface ?? appearance.chrome)))
     }
 }
 
@@ -2012,12 +2009,9 @@ private struct NavButton: View {
     }
 
     private func button(_ symbol: String) -> some View {
-        Button { dispatch(command) } label: {
-            Image(systemName: symbol).font(.system(size: 13, weight: .medium)).frame(width: 26, height: 24)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(onGlass ? AnyShapeStyle(.secondary)
-                                 : AnyShapeStyle(appearance.secondaryText(on: surface ?? appearance.chrome)))
+        IconButton(symbol: symbol) { dispatch(command) }
+            .foregroundStyle(onGlass ? AnyShapeStyle(.secondary)
+                                     : AnyShapeStyle(appearance.secondaryText(on: surface ?? appearance.chrome)))
     }
 }
 
@@ -2066,7 +2060,7 @@ private struct CornerToolbar: View {
 
     var body: some View {
         if !commands.isEmpty || editing || downloads.hasUnseen {
-            HStack(spacing: 2) {
+            HStack(spacing: appearance.space(.hair)) {
                 if expanded {
                     ForEach(commands) { command in
                         EditableControl(model: model, command: command, dispatch: dispatch,
@@ -2082,9 +2076,9 @@ private struct CornerToolbar: View {
                             // accent, which washed the circle out whenever it
                             // sat close to the glass colour.
                             Image(systemName: "checkmark.circle")
-                                .font(.system(size: 13, weight: .medium))
+                                .font(appearance.glyph(.chrome))
                                 .foregroundStyle(.primary)
-                                .frame(width: 26, height: 24).contentShape(Rectangle())
+                                .frame(width: appearance.controlSize.width, height: appearance.controlSize.height).contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .help("Done")
@@ -2112,7 +2106,7 @@ private struct CornerToolbar: View {
             }
             // One padding for both states: the grip and the buttons wear the
             // same frame, so the surface never changes height on hover.
-            .padding(.horizontal, 6).padding(.vertical, 2)
+            .padding(.horizontal, appearance.space(.snug)).padding(.vertical, appearance.space(.hair))
             // The shared overlay surface — Liquid Glass where the OS has it,
             // frosted material otherwise — in the tab's own shape (pill open,
             // docked tab closed).
@@ -2158,8 +2152,8 @@ private struct CornerToolbar: View {
             }
         } label: {
             Image(systemName: "plus.circle")
-                .font(.system(size: 13, weight: .medium))
-                .frame(width: 26, height: 24).contentShape(Rectangle())
+                .font(appearance.glyph(.chrome))
+                .frame(width: appearance.controlSize.width, height: appearance.controlSize.height).contentShape(Rectangle())
         }
         .menuStyle(.borderlessButton).menuIndicator(.hidden)
         .frame(width: 26)
@@ -2201,16 +2195,16 @@ private struct EditableControl: View {
             // gesture coexist (tap = no travel, drag = travel), so a click
             // still cycles the shelf and a drag still lifts the control.
             Image(systemName: command.icon)
-                .font(.system(size: 13, weight: .medium))
-                .frame(width: 26, height: 24)
+                .font(appearance.glyph(.chrome))
+                .frame(width: appearance.controlSize.width, height: appearance.controlSize.height)
                 .foregroundStyle(ink)
                 .contentShape(Rectangle())
                 .modifier(Wiggle())
                 .draggable(ControlDrag(command: command.rawValue)) {
                     // The drag preview: the same glyph on a small chip.
                     Image(systemName: command.icon)
-                        .font(.system(size: 13, weight: .medium))
-                        .frame(width: 26, height: 24)
+                        .font(appearance.glyph(.chrome))
+                        .frame(width: appearance.controlSize.width, height: appearance.controlSize.height)
                 }
                 .onTapGesture { withAnimation(Motion.update) { swap() } }
                 .overlay(alignment: .topLeading) {
@@ -2281,7 +2275,7 @@ private struct MinimalChrome: View {
     /// as a wiggle-mode drop target. An empty one still shows a landing spot
     /// while editing so you can drop the first button into it.
     private func cluster(_ slot: AppearanceStore.ControlSlot, _ commands: [Command]) -> some View {
-        HStack(spacing: 2) {
+        HStack(spacing: appearance.space(.hair)) {
             ForEach(commands) { command in
                 EditableControl(model: model, command: command, dispatch: dispatch,
                                 editing: editing, surface: surface,
@@ -2310,7 +2304,7 @@ private struct MinimalChrome: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: appearance.space(.gap)) {
             if stripCarriesLights { TrafficLights() }
             // The way back: with the sidebar away, its toggle moves up here. In
             // zen the sidebar answers to an edge hover instead, so no toggle.
@@ -2334,7 +2328,7 @@ private struct MinimalChrome: View {
             }
             cluster(.trailing, appearance.stripTrailingCommands)
         }
-        .padding(.horizontal, 12).padding(.vertical, 3)
+        .padding(.horizontal, appearance.space(.roomy)).padding(.vertical, 3)
         .frame(height: 36)
         .background {
             ZStack {
@@ -2384,7 +2378,7 @@ struct CollectSheet: View {
             Divider().overlay(appearance.hairline)
 
             ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 10)], spacing: 10) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: appearance.space(.gap))], spacing: appearance.space(.gap)) {
                     ForEach(candidates) { c in
                         candidateCell(c)
                     }
@@ -2394,7 +2388,7 @@ struct CollectSheet: View {
             .frame(maxHeight: 380)
 
             Divider().overlay(appearance.hairline)
-            HStack(spacing: 8) {
+            HStack(spacing: appearance.space(.base)) {
                 Text("Saves to \(AssetSaver.directory(model.settings).lastPathComponent)")
                     .font(appearance.font(11)).foregroundStyle(.secondary)
                 Spacer()

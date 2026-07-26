@@ -99,7 +99,7 @@ struct ReaderView: View {
                 if !article.title.isEmpty {
                     Text(article.title)
                         .font(appearance.font(32, weight: .semibold))
-                        .padding(.bottom, 4)
+                        .padding(.bottom, appearance.space(.tight))
                 }
                 ForEach(Array(article.blocks.enumerated()), id: \.offset) { _, block in
                     view(for: block)
@@ -120,9 +120,9 @@ struct ReaderView: View {
     private func view(for block: ReaderArticle.Block) -> some View {
         switch block.type {
         case "h":
-            Text(block.text).font(appearance.font(21, weight: .semibold)).padding(.top, 10)
+            Text(block.text).font(appearance.font(21, weight: .semibold)).padding(.top, appearance.space(.gap))
         case "li":
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: appearance.space(.gap)) {
                 Text("•").foregroundStyle(appearance.accent)
                 Text(block.text).font(appearance.font(16))
             }

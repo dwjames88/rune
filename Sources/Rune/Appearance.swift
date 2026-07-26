@@ -19,6 +19,10 @@ struct Appearance: Codable, Equatable {
     var textColor = "auto"
 
     // Layout
+    /// How tightly the whole interface is packed. Every gap, pad and control
+    /// size in Rune is this times a step on the spacing scale, so one knob
+    /// moves the lot. 1.0 is the design as drawn.
+    var density: Double = 1.0
     var sidebarWidth: Double = 240
     var cornerRadius: Double = 8
     var sidebarOnRight = false
@@ -90,7 +94,7 @@ struct Appearance: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case accent, sidebarColor, chromeColor, backgroundColor
         case fontName, fontSize, textColor
-        case sidebarWidth, cornerRadius, sidebarOnRight
+        case density, sidebarWidth, cornerRadius, sidebarOnRight
         case toolbarButtons, stripLeadingButtons, stripTrailingButtons
         case compactAddressBar, addressAlignment, chromeStyle, navPlacement, zenStyle
         case startPageGreeting, startPageShowFavorites, startPageShowRecents, startPageBackground
@@ -114,6 +118,7 @@ struct Appearance: Codable, Equatable {
         fontName = try c.decodeIfPresent(String.self, forKey: .fontName) ?? d.fontName
         fontSize = try c.decodeIfPresent(Double.self, forKey: .fontSize) ?? d.fontSize
         textColor = try c.decodeIfPresent(String.self, forKey: .textColor) ?? d.textColor
+        density = try c.decodeIfPresent(Double.self, forKey: .density) ?? d.density
         sidebarWidth = try c.decodeIfPresent(Double.self, forKey: .sidebarWidth) ?? d.sidebarWidth
         cornerRadius = try c.decodeIfPresent(Double.self, forKey: .cornerRadius) ?? d.cornerRadius
         sidebarOnRight = try c.decodeIfPresent(Bool.self, forKey: .sidebarOnRight) ?? d.sidebarOnRight

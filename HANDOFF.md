@@ -99,6 +99,7 @@ iOS keeps `state.json` (a `SyncState`) in its app Documents directory.
 | `WebViewMenu.swift` | `RuneWebView` — repairs WebKit's dead "Download Image/Linked File" menu items; `CollectCandidate` |
 | `BrowserView.swift` | Sidebar, rows, minimal strip / classic toolbar, address bar + suggestions, start page, split view, corner kit, **Zen reveals**, collect sheet |
 | `Appearance.swift` | `Appearance`, `AppearanceStore`, presets, WCAG contrast, `Color(hex:)`, control placement, app icons |
+| `DesignSystem.swift` | **The variables and the components.** Spacing scale, glyph sizes, control metrics, `IconButton`, `SectionLabel` |
 | `Stores.swift` | `Storage`, `DebouncedWrite`, `SiteSettings`, `SearchEngine`, `SettingsStore`, `HistoryStore`, `ShortcutStore`, notification names |
 | `SettingsWindow.swift` | Settings: Appearance / Presets / Spaces / Browsing / AI / Shortcuts / **Updates** |
 | `Downloads.swift` | `DownloadLocation`, **`AssetSaver`** (the one door every save goes through), `DownloadItem`, `DownloadStore`, toolbar ring, progress card |
@@ -145,6 +146,37 @@ no downloads list after the Finder window went. Still open, deliberately:
 - **Sync.** The iOS app is hibernated (§9); CloudKit also waits on the Program.
 - **Spell/grammar UI.** WKWebView does spell-check editable fields itself; Rune adds no
   Substitutions menu of its own.
+
+### The design system — use it, don't work around it
+
+Every measurement in the UI comes from `AppearanceStore`, and all of it scales off settings:
+
+| Variable | Steps | Hangs off |
+|---|---|---|
+| `space(_:)` | `.hair` 2 · `.tight` 4 · `.snug` 6 · `.base` 8 · `.gap` 10 · `.roomy` 12 · `.wide` 16 · `.section` 24 | `appearance.density` |
+| `glyph(_:)` | `.small` 10 · `.medium` 11 · `.chrome` 13 · `.large` 14 | `appearance.density` |
+| `controlSize` | 26 × 24 — every chrome icon button | `appearance.density` |
+| `radius(_:)` | `.small` · `.medium` · `.large` · `.pill` | `appearance.cornerRadius` |
+| `type(_:)` | `.caption` · `.label` · `.body` · `.title` · `.display` | `appearance.fontSize` |
+| colors | `accent`, `chrome`, `sidebarBG`, `windowBG`, `hairline`, `hover`, `text(on:)`, `secondaryText(on:)` | the colour settings |
+
+**Density is new**: one multiplier over every gap, pad and control size, so the whole
+interface tightens or opens together (Settings ▸ Appearance ▸ Layout). At `1.0` each token
+returns exactly the number that used to be hardcoded there, which is why adopting them was a
+visual no-op.
+
+**Rules.** Don't write a raw point value where a token exists — that's what the scale is
+for, and a hardcoded 8 doesn't move when density does. Components live in
+`DesignSystem.swift`: `IconButton` (the shared chrome button and its tap target) and
+`SectionLabel` (the tracked micro-caps group header). Add a component when a pattern has
+**two or more real call sites** — two speculative ones written this session were deleted
+again for having none.
+
+**Not everything takes the store on purpose.** `RenamePopover` and `SymbolPicker` lean on
+system styling and take no `AppearanceStore`; they keep their raw values. Don't add
+`@EnvironmentObject var appearance` to reach a token — a missing environment object is a
+hard crash, and these are presented from several places. Pass the store explicitly, the way
+the Settings panes do.
 
 ## 6. Gotchas that will waste your time
 

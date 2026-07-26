@@ -87,7 +87,7 @@ struct CommandPalette: View {
                 .onTapGesture { close() }
 
             VStack(spacing: 0) {
-                HStack(spacing: 10) {
+                HStack(spacing: appearance.space(.gap)) {
                     Image(systemName: mode == .newTab ? "plus.magnifyingglass" : "command")
                         .foregroundStyle(.secondary)
                     TextField(prompt, text: $query)
@@ -103,7 +103,7 @@ struct CommandPalette: View {
 
                 ScrollViewReader { proxy in
                     ScrollView {
-                        VStack(spacing: 2) {
+                        VStack(spacing: appearance.space(.hair)) {
                             ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                                 PaletteRow(item: item, model: model, selected: index == selection)
                                     .id(index)
@@ -169,7 +169,7 @@ private struct PaletteRow: View {
     @EnvironmentObject var appearance: AppearanceStore
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: appearance.space(.gap)) {
             Image(systemName: icon).frame(width: 20)
                 .foregroundStyle(selected ? AnyShapeStyle(appearance.accentSecondaryText) : AnyShapeStyle(.secondary))
             VStack(alignment: .leading, spacing: 1) {
@@ -179,7 +179,7 @@ private struct PaletteRow: View {
             Spacer()
             if let trailing { Text(trailing).font(.callout).foregroundStyle(selected ? AnyShapeStyle(appearance.accentSecondaryText) : AnyShapeStyle(.secondary)) }
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
+        .padding(.horizontal, appearance.space(.roomy)).padding(.vertical, appearance.space(.base))
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(selected ? appearance.accent : .clear))
     }
 

@@ -24,7 +24,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                                   sites: sites, blocker: blocker, appearance: appearance)
     lazy var settingsWindow = SettingsWindowController(
         settings: settings, shortcuts: shortcuts, history: history, appearance: appearance,
-        ai: ai, sites: sites, updater: updater, model: { [unowned self] in self.model })
+        ai: ai, sites: sites, updater: updater, model: { [unowned self] in self.model },
+        dispatch: { [unowned self] in self.dispatch($0) })
     private var window: NSWindow?
 
     /// Every browser window and the model behind it — the main one, plus any
@@ -494,7 +495,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         case .pinTab: if let t = model.activeTab { model.pin(t) }
         case .nextTab: model.selectAdjacentSession(1)
         case .previousTab: model.selectAdjacentSession(-1)
-        case .editControls: show(.toggleControlEdit)
+        case .editControls:
+            // Wiggle mode happens on the toolbar, so it has to happen where you
+            // can see it — this is reachable from Settings, which is a different
+            // window entirely.
+            window?.makeKeyAndOrderFront(nil)
+            show(.toggleControlEdit)
         case .openSettings: settingsWindow.show()
         }
     }

@@ -71,7 +71,7 @@ private struct DetachedView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
+            HStack(spacing: appearance.space(.base)) {
                 // Room for the traffic lights.
                 Color.clear.frame(width: 56, height: 1)
                 Favicon(image: tab.favicon, name: tab.displayName, size: 14, loading: tab.isLoading)
@@ -89,7 +89,7 @@ private struct DetachedView: View {
                 .help("Keep this — move it into your tabs (⌘↩)")
                 .keyboardShortcut(.return, modifiers: .command)
             }
-            .padding(.horizontal, 10).padding(.vertical, 8)
+            .padding(.horizontal, appearance.space(.gap)).padding(.vertical, appearance.space(.base))
             .background(appearance.chrome)
             .foregroundStyle(appearance.chromeText)
             Divider()

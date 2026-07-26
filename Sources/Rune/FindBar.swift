@@ -18,7 +18,7 @@ struct FindBar: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: appearance.space(.base)) {
             Image(systemName: "magnifyingglass").font(.system(size: 11))
                 .foregroundStyle(appearance.secondaryText(on: appearance.chrome))
             TextField("Find on page", text: $query)
@@ -38,11 +38,11 @@ struct FindBar: View {
             step("chevron.up", "Previous match") { find(forward: false) }
             step("chevron.down", "Next match (↩)") { find(forward: true) }
             Divider().frame(height: 14)
-            Button(action: close) { Image(systemName: "xmark").font(.system(size: 10, weight: .medium)) }
+            Button(action: close) { Image(systemName: "xmark").font(appearance.glyph(.small)) }
                 .buttonStyle(.plain).help("Done (esc)")
                 .foregroundStyle(appearance.secondaryText(on: appearance.chrome))
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
+        .padding(.horizontal, appearance.space(.roomy)).padding(.vertical, appearance.space(.base))
         .runeSurface(appearance, .pill)
         // The one thing the shared surface can't say: nothing matched.
         .overlay(RoundedRectangle(cornerRadius: appearance.radius(.pill))
@@ -54,7 +54,7 @@ struct FindBar: View {
     }
 
     private func step(_ symbol: String, _ help: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: symbol).font(.system(size: 10, weight: .medium)) }
+        Button(action: action) { Image(systemName: symbol).font(appearance.glyph(.small)) }
             .buttonStyle(.plain)
             .disabled(query.isEmpty)
             .help(help)

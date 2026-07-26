@@ -77,7 +77,7 @@ struct SpacesPane: View {
 
     @ViewBuilder
     private func SpaceRow(space: Space) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: appearance.space(.gap)) {
             Button { pickingIcon = space.id } label: {
                 Image(systemName: space.icon)
                     .foregroundStyle(tint(space)).frame(width: 20)
@@ -141,7 +141,7 @@ struct SpacesPane: View {
 
     @ViewBuilder
     private func SessionRow(session: NamedSession) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: appearance.space(.gap)) {
             Image(systemName: "tray.full").foregroundStyle(.secondary).frame(width: 20)
             Text(session.name)
             Spacer()
@@ -166,7 +166,7 @@ struct SpacesPane: View {
 
     @ViewBuilder
     private func ProfileRow(profile: Profile) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: appearance.space(.gap)) {
             Button { pickingProfileIcon = profile.id } label: {
                 Image(systemName: profile.icon).foregroundStyle(appearance.accent).frame(width: 20)
             }
