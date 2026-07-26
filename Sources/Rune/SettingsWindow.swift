@@ -526,13 +526,63 @@ private struct BrowsingPane: View {
 
     @State private var importing = false
     @State private var importResult: String?
+    @State private var newEngineName = ""
+    @State private var newEngineTemplate = ""
+
+    /// A usable engine needs a name nothing else is using, and a template with
+    /// somewhere to put the query.
+    private var newEngineIsValid: Bool {
+        let name = newEngineName.trimmingCharacters(in: .whitespaces)
+        let template = newEngineTemplate.trimmingCharacters(in: .whitespaces)
+        return !name.isEmpty && template.contains("{q}")
+            && URL(string: template.replacingOccurrences(of: "{q}", with: "test")) != nil
+            && !settings.allEngines.contains { $0.name.caseInsensitiveCompare(name) == .orderedSame }
+    }
+
+    private func addEngine() {
+        guard newEngineIsValid else { return }
+        settings.customEngines.append(SearchEngine(
+            name: newEngineName.trimmingCharacters(in: .whitespaces),
+            queryTemplate: newEngineTemplate.trimmingCharacters(in: .whitespaces)))
+        newEngineName = ""; newEngineTemplate = ""
+    }
 
     var body: some View {
         Form {
-            Section("Search") {
+            Section {
                 Picker("Search engine", selection: $settings.searchEngine) {
                     ForEach(settings.allEngines) { Text($0.name).tag($0) }
                 }
+                ForEach(settings.customEngines) { engine in
+                    HStack {
+                        Text(engine.name)
+                        Spacer()
+                        Text(engine.queryTemplate)
+                            .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        Button {
+                            // Don't leave the picker pointing at something that
+                            // no longer exists.
+                            if settings.searchEngine == engine {
+                                settings.searchEngine = SearchEngine.presets[0]
+                            }
+                            settings.customEngines.removeAll { $0.id == engine.id }
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.plain).help("Remove \(engine.name)")
+                    }
+                }
+                HStack {
+                    TextField("Name", text: $newEngineName).frame(width: 110)
+                    TextField("https://example.com/search?q={q}", text: $newEngineTemplate)
+                    Button("Add") { addEngine() }
+                        .disabled(!newEngineIsValid)
+                }
+            } header: {
+                Text("Search")
+            } footer: {
+                Text("Add any site that searches by URL: copy one of its result-page addresses and put **{q}** where your search terms were. The engine you pick here is what a plain phrase in the address bar goes to.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section {
                 Picker("New tabs open with", selection: $settings.newTabBehavior) {

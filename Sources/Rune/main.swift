@@ -117,7 +117,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let center = NotificationCenter.default
         center.addObserver(self, selector: #selector(buildMenu), name: .shortcutsChanged, object: nil)
         center.addObserver(self, selector: #selector(applyWindowChrome), name: .appearanceChanged, object: nil)
-        center.addObserver(self, selector: #selector(frontBrowserWindow), name: .frontBrowserWindow, object: nil)
         center.addObserver(forName: .glanceLink, object: nil, queue: .main) { [weak self] note in
             // Pull the URL out before hopping: a Notification isn't Sendable,
             // and a URL is.
@@ -278,10 +277,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private var appliedIconChoice: String?
 
-    @objc private func frontBrowserWindow() {
-        window?.makeKeyAndOrderFront(nil)
-    }
-
     @objc private func applyWindowChrome() {
         for browser in browsers {
             TitlebarRemover.strip(browser.window)
@@ -370,14 +365,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             if settings.newTabBehavior == .addressOverlay { show(.showNewTabOverlay) }
             else { model.newTab() }
         case .closeTab:
-            // ⌘W closes what you're looking at; with nothing left to close it
-            // closes the window, rather than leaving an empty one you can only
-            // get out of with the mouse. A private window in that state is a
-            // dead end — no favorites, no rows, nothing to click.
-            if model.currentSelection == nil {
-                NSApp.keyWindow?.performClose(nil)
-            } else {
+            // ⌘W closes what you're looking at. On a browser window that's the
+            // tab — and once there's no tab left, the window itself, rather
+            // than an empty one you can only escape with the mouse (a private
+            // window in that state is a dead end: no favorites, no rows).
+            // Anywhere else — Settings, a glance — it's that window, not a tab
+            // in a browser you can't even see.
+            let key = NSApp.keyWindow
+            let onBrowser = key.map { w in browsers.contains { $0.window === w } } ?? false
+            if onBrowser, model.currentSelection != nil {
                 model.closeActive()
+            } else {
+                key?.performClose(nil)
             }
         case .reload: model.reload()
         case .goBack: model.goBack()

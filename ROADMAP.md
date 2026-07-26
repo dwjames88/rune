@@ -151,7 +151,11 @@ All shipped. Kept here as the map of what landed where.
 6. **Theme sync with wallpaper/space** — per-Space appearance follows macOS
    appearance or wallpaper accent.
 
-## Tier 4 — Rune for iOS (started v1.16)
+## Tier 4 — Rune for iOS (started v1.16, **hibernated 2026-07-25**)
+
+**Parked on purpose — the appetite is the Mac app.** Nothing in the macOS
+target depends on `ios/`; the root package never compiles it. Left here as the
+plan for when it wakes up.
 
 `ios/` is a second SwiftPM package: a phone-shaped Rune whose whole chrome is
 one floating bar (page-tinted Liquid Glass), with a card tab-switcher that also
@@ -183,5 +187,5 @@ FoundationModels before the Tier 3 AI features so they're built on the local
 model from the start rather than ported to it; then the Claude + sync moat
 nobody else can copy cheaply.
 
-From v1.16 the appetite is: **Boosts-lite (3.4) and Page automations (3.5)**,
-then **folder/tab sync (4.1)** to make the phone worth carrying.
+From v1.16 the appetite is **Boosts-lite (3.4) then Page automations (3.5)**,
+both on the Mac. Tier 4 (iOS) is hibernated until the owner reopens it.

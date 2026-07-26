@@ -405,8 +405,20 @@ final class BrowserModel: ObservableObject {
 
     private var tidySweep: Task<Void, Never>?
 
-    private var hoverObserver: (any NSObjectProtocol)?
-    private var blockingObserver: (any NSObjectProtocol)?
+    // Written once in init, read once in deinit, touched nowhere else — so a
+    // nonisolated deinit can hand them back without hopping actors.
+    private nonisolated(unsafe) var hoverObserver: (any NSObjectProtocol)?
+    private nonisolated(unsafe) var blockingObserver: (any NSObjectProtocol)?
+
+    /// A private window's model dies with its window. Its observers have to go
+    /// with it: block-based registrations outlive the object they capture
+    /// weakly, so without this every private window ever opened would leave a
+    /// dead entry behind, woken on every appearance or blocking change.
+    deinit {
+        if let hoverObserver { NotificationCenter.default.removeObserver(hoverObserver) }
+        if let blockingObserver { NotificationCenter.default.removeObserver(blockingObserver) }
+        tidySweep?.cancel()
+    }
 
     // MARK: Profiles
 
@@ -661,9 +673,18 @@ final class BrowserModel: ObservableObject {
         var next = preset.appearance
         let current = appearance.appearance
         next.toolbarButtons = current.toolbarButtons
+        // The two strip clusters are *where* the buttons sit; keeping only the
+        // enabled list above would honor "same buttons" while still shuffling
+        // them between the shelves on every space change — which is the exact
+        // thing this is here to prevent.
+        next.stripLeadingButtons = current.stripLeadingButtons
+        next.stripTrailingButtons = current.stripTrailingButtons
         next.compactAddressBar = current.compactAddressBar
+        next.addressAlignment = current.addressAlignment
         next.sidebarOnRight = current.sidebarOnRight
         next.hideTrafficLights = current.hideTrafficLights
+        // Zen is a way of working, not a look a room can put on you.
+        next.zenStyle = current.zenStyle
         appearance.appearance = next
     }
 
@@ -1388,7 +1409,17 @@ final class BrowserModel: ObservableObject {
     /// page after, since a rule change can't reach requests already made.
     func toggleBlockingForActiveSite() {
         guard let host = activeTab?.webView.url?.host else { return }
-        let blocking = sites.blocks(host, default: true)
+        // With blocking off everywhere there is no rule list to except a site
+        // from, so this would write an exception that does nothing today and
+        // quietly un-blocks the site the day blocking is switched back on. Say
+        // so instead.
+        guard settings.blockContent else {
+            NotificationCenter.default.post(
+                name: .finderToast,
+                object: "Blocking is off for every site — turn it on in Settings ▸ Browsing")
+            return
+        }
+        let blocking = sites.blocks(host, default: settings.blockContent)
         // Back to nil rather than `true` when re-enabling: no opinion is not the
         // same as an opinion that happens to match, and it keeps sites.json small.
         sites.setBlocking(blocking ? false : nil, for: host)

@@ -7,9 +7,9 @@ Last updated **2026-07-25** (v1.16 in development; v1.15 is the public release).
 
 ## 1. What Rune is
 
-A native macOS browser — and, since v1.16, a companion iOS app: **Swift + SwiftUI/AppKit +
-WebKit (WKWebView)**, **zero third-party dependencies**, SwiftPM (no Xcode project on the Mac
-side). Owner: James (GitHub `dwjames88`).
+A native macOS browser: **Swift + SwiftUI/AppKit + WebKit (WKWebView)**, **zero third-party
+dependencies**, SwiftPM (no Xcode project). Owner: James (GitHub `dwjames88`).
+An iOS companion exists in `ios/` but is **hibernated** — see §9.
 Repo: <https://github.com/dwjames88/rune> · Local: `~/Developer/rune`
 
 **Non-negotiables** (from the owner, repeated across sessions):
@@ -102,15 +102,7 @@ iOS keeps `state.json` (a `SyncState`) in its app Documents directory.
 | `PageBridge.swift` | Injected JS: link hover, selection, audio, scroll direction, context target, media collection |
 | `SpacesPane.swift` · `BookmarkImport.swift` · `SymbolPicker.swift` · `DragDrop.swift` | Spaces/profiles settings · bookmark import · SF Symbol picker · Transferables |
 
-### `ios/Sources/RuneMobile/` (iOS, new in v1.16)
-
-| File | Role |
-|---|---|
-| `App.swift` | `@main`, persists on background |
-| `Model.swift` | `MobileTab` (owns its web view for life), `MobileStore`, `Favorite`/`Folder`, **`SyncState`** — the shape sync will speak |
-| `BrowserScreen.swift` | The one floating bottom bar (page-tinted Liquid Glass), start page |
-| `TabSwitcher.swift` | Saved chips (favourites + folders) above snapshot cards |
-| `SearchOverlay.swift` · `MenuSheet.swift` · `WebView.swift` · `Theme.swift` | Typing room · action tiles · web container · Rune tokens + `runeGlass` |
+### `ios/` — hibernated, see §9
 
 ## 5. Feature state (v1.16, on `tier-1-fundamentals` and `main`)
 
@@ -121,7 +113,7 @@ blocking + cookie-banner hiding · split view · panels · reader · find in pag
 glance/segment windows · bookmark import · deep appearance customization + presets ·
 Liquid Glass · customizable toolbar with wiggle mode + corner kit · **Zen Mode** (full and
 subtle, ⌃⌘Z) · **in-app update checks** · **alternate app icons** (drop a `.icon` bundle in
-`Assets/Icons`) · **Rune for iOS** (tabs, folders, search, glass chrome).
+`Assets/Icons`).
 
 **v1.16's big change:** the **Finder library window was removed**. The grab tools stayed —
 right-click, ⌥S, ⇧⌘S collect, Capture Page as Image — and all now land in your download
@@ -184,13 +176,32 @@ right-click ▸ Open, worth repeating in every release note.
 visible feature loss, so the owner should run it before it reaches anyone who downloaded
 v1.15. To ship: bump `VERSION`, then follow §7.
 
-The agreed appetite after that, in order:
+The agreed appetite, in order — **Mac only**:
 
 1. **Boosts-lite** (ROADMAP 3.4) — per-site CSS/JS snippets, stored data-driven like
    everything else. `PageBridge` already has the injection seam and `SiteSettings` already
    has the per-host store to hang them on.
 2. **Page automations** (ROADMAP 3.5) — recorded PageBridge actions replayed with
    Claude/Apple Intelligence reasoning on top.
-3. **Folder + tab sync** (ROADMAP 4.1) — the reason the iOS app exists. `SyncState` is
-   already the on-disk shape on both ends. Local network first (Bonjour +
-   `Network.framework`, zero deps); CloudKit waits on the Developer Program.
+
+## 9. Rune for iOS — hibernated (2026-07-25)
+
+`ios/` holds a working first cut: a phone-shaped Rune whose whole chrome is one floating
+bar (page-tinted Liquid Glass), a card tab-switcher that also carries favourites and
+folders, a search overlay, and a menu sheet. It builds and runs on the simulator
+(`scripts/ios-run.sh`) and on device via `ios/Rune.xcodeproj`.
+
+**It is parked on purpose. Don't spend time on it** unless the owner reopens it — the
+appetite is the Mac app. Nothing in the macOS target depends on `ios/`; the root package
+is macOS-only and never compiles it.
+
+When it wakes up, the point is **folder + tab sync**: `SyncState` (favourites, folders,
+tabs) is already the on-disk shape on both ends, chosen as the wire format. Local network
+first (Bonjour + `Network.framework`, zero deps); CloudKit waits on a paid Developer
+Program membership. Also outstanding there: real favicons instead of letter chips, and
+restoring the previously-selected tab rather than the last one.
+
+**Simulator caveat** (the reason this cost time): under Xcode-beta the CoreSimulator
+display freezes seconds after boot and `SimulatorKit.framework` is missing, so the Claude
+simulator panel can't attach. Use a device on the stable **iOS 26.5** runtime, or fix it
+properly with `sudo xcode-select -s /Applications/Xcode.app` (needs the owner's password).
