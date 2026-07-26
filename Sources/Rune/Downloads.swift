@@ -259,6 +259,8 @@ struct DownloadsButton: View {
     var onGlass = false
     /// What ⌥⌘L does: open the folder itself. The list offers it too.
     let action: () -> Void
+    /// Go and get a failed one again.
+    var retry: ((DownloadItem) -> Void)? = nil
     @EnvironmentObject var appearance: AppearanceStore
     @State private var showList = false
 
@@ -271,7 +273,7 @@ struct DownloadsButton: View {
         } label: {
             ZStack {
                 Image(systemName: "arrow.down.circle")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(appearance.glyph(.chrome))
                 if downloads.activeCount > 0 {
                     Circle()
                         .trim(from: 0, to: downloads.activeFraction ?? 0.15)
@@ -281,7 +283,7 @@ struct DownloadsButton: View {
                         .animation(.linear(duration: 0.15), value: downloads.activeFraction)
                 }
             }
-            .frame(width: 26, height: 24)
+            .frame(width: appearance.controlSize.width, height: appearance.controlSize.height)
             .overlay(alignment: .topTrailing) {
                 if downloads.hasUnseen && downloads.activeCount == 0 {
                     Circle().fill(appearance.accent).frame(width: 5, height: 5).offset(x: -3, y: 3)
@@ -293,7 +295,7 @@ struct DownloadsButton: View {
                                  : AnyShapeStyle(appearance.secondaryText(on: appearance.chrome)))
         .help("Downloads — ⌥⌘L opens the folder")
         .popover(isPresented: $showList, arrowEdge: .bottom) {
-            DownloadsPopover(downloads: downloads, openFolder: action)
+            DownloadsPopover(downloads: downloads, openFolder: action, retry: retry)
                 .environmentObject(appearance)
         }
     }
@@ -305,13 +307,16 @@ struct DownloadsButton: View {
 struct DownloadsPopover: View {
     @ObservedObject var downloads: DownloadStore
     let openFolder: () -> Void
+    var retry: ((DownloadItem) -> Void)? = nil
     @EnvironmentObject var appearance: AppearanceStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollView {
-                VStack(spacing: 2) {
-                    ForEach(downloads.items) { DownloadRow(item: $0) }
+                VStack(spacing: appearance.space(.hair)) {
+                    ForEach(downloads.items) { item in
+                        DownloadRow(item: item, retry: retry.map { r in { r(item) } })
+                    }
                 }
                 .padding(8)
             }
@@ -326,7 +331,7 @@ struct DownloadsPopover: View {
                 }
             }
             .font(.system(size: 11))
-            .padding(.horizontal, 10).padding(.vertical, 7)
+            .padding(.horizontal, appearance.space(.gap)).padding(.vertical, 7)
         }
         .frame(width: 320)
     }
@@ -336,6 +341,7 @@ struct DownloadsPopover: View {
 /// while it runs, reveal once it lands.
 private struct DownloadRow: View {
     @ObservedObject var item: DownloadItem
+    var retry: (() -> Void)? = nil
     @EnvironmentObject var appearance: AppearanceStore
 
     private var icon: String {
@@ -352,7 +358,7 @@ private struct DownloadRow: View {
                 .foregroundStyle(item.state == .running ? AnyShapeStyle(appearance.accent)
                                                         : AnyShapeStyle(.secondary))
                 .frame(width: 18)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: appearance.space(.hair)) {
                 Text(item.filename).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
                 if item.isRunning {
                     if let fraction = item.fraction {
@@ -371,9 +377,14 @@ private struct DownloadRow: View {
             } else if item.state == .finished, item.destination != nil {
                 Button { item.reveal() } label: { Image(systemName: "magnifyingglass.circle") }
                     .buttonStyle(.plain).help("Show in Finder").foregroundStyle(.secondary)
+            } else if case .failed = item.state, let retry {
+                // Cancelled or broken — the source URL is still known, so the
+                // row can offer to go and get it again.
+                Button(action: retry) { Image(systemName: "arrow.clockwise.circle") }
+                    .buttonStyle(.plain).help("Try again").foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, 6).padding(.vertical, 5)
+        .padding(.horizontal, appearance.space(.snug)).padding(.vertical, 5)
         .contentShape(Rectangle())
         // A finished file opens on click; anything else has nothing to open.
         .onTapGesture { if item.state == .finished { item.open() } }
@@ -407,7 +418,7 @@ struct DownloadProgressCard: View {
                 }
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 9)
+        .padding(.horizontal, appearance.space(.roomy)).padding(.vertical, 9)
         .frame(width: 230)
         .runeSurface(appearance, .large)
     }

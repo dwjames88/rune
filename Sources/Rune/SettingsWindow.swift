@@ -14,15 +14,20 @@ final class SettingsWindowController {
     let updater: Updater
     /// Resolved lazily: the browser model is built after this controller.
     let model: () -> BrowserModel
+    /// Settings never acts on the browser directly — it asks for a command, the
+    /// same way the menu and the palette do.
+    let dispatch: (Command) -> Void
     /// Set before `show()` to open on a particular section.
     private var pendingTab: RuneSettingsView.Tab?
 
     init(settings: SettingsStore, shortcuts: ShortcutStore, history: HistoryStore,
          appearance: AppearanceStore, ai: AIService, sites: SiteSettings,
-         updater: Updater, model: @escaping () -> BrowserModel) {
+         updater: Updater, model: @escaping () -> BrowserModel,
+         dispatch: @escaping (Command) -> Void) {
         self.settings = settings; self.shortcuts = shortcuts; self.history = history
         self.appearance = appearance; self.ai = ai
         self.sites = sites; self.updater = updater; self.model = model
+        self.dispatch = dispatch
     }
 
     /// Open Settings on a specific tab (used by "Check for Updates…").
@@ -40,7 +45,7 @@ final class SettingsWindowController {
             w.contentViewController = NSHostingController(rootView: RuneSettingsView(
                 settings: settings, shortcuts: shortcuts, history: history,
                 appearance: appearance, ai: ai, sites: sites, updater: updater,
-                model: model, initialTab: pendingTab))
+                model: model, dispatch: dispatch, initialTab: pendingTab))
             window = w
         } else if let t = pendingTab, let host = window?.contentViewController as? NSHostingController<RuneSettingsView> {
             host.rootView.jumpTo = t
@@ -60,6 +65,7 @@ struct RuneSettingsView: View {
     @ObservedObject var sites: SiteSettings
     @ObservedObject var updater: Updater
     let model: () -> BrowserModel
+    let dispatch: (Command) -> Void
     var initialTab: Tab? = nil
     /// A window that's already open jumps here when set (see `show(tab:)`).
     var jumpTo: Tab? = nil
@@ -97,7 +103,7 @@ struct RuneSettingsView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: appearance.space(.hair)) {
                 ForEach(Tab.allCases) { row($0) }
                 Spacer(minLength: 0)
             }
@@ -110,14 +116,14 @@ struct RuneSettingsView: View {
 
             Group {
                 switch tab {
-                case .appearance: AppearancePane(appearance: appearance)
+                case .appearance: AppearancePane(appearance: appearance, dispatch: dispatch)
                 case .presets: PresetsPane(appearance: appearance)
                 case .spaces: SpacesPane(model: model(), appearance: appearance)
-                case .browsing: BrowsingPane(settings: settings, history: history,
+                case .browsing: BrowsingPane(appearance: appearance, settings: settings, history: history,
                                              sites: sites, model: model)
                 case .ai: AIPane(ai: ai, settings: settings)
-                case .shortcuts: ShortcutsPane(shortcuts: shortcuts)
-                case .updates: UpdatesPane(updater: updater)
+                case .shortcuts: ShortcutsPane(shortcuts: shortcuts, appearance: appearance)
+                case .updates: UpdatesPane(updater: updater, appearance: appearance)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -129,16 +135,16 @@ struct RuneSettingsView: View {
 
     private func row(_ t: Tab) -> some View {
         Button { tab = t } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: appearance.space(.base)) {
                 Image(systemName: t.icon)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(appearance.glyph(.medium, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 22, height: 22)
                     .background(t.chip.gradient, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                 Text(t.rawValue)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 8).padding(.vertical, 5)
+            .padding(.horizontal, appearance.space(.base)).padding(.vertical, 5)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -151,6 +157,7 @@ struct RuneSettingsView: View {
 
 private struct AppearancePane: View {
     @ObservedObject var appearance: AppearanceStore
+    let dispatch: (Command) -> Void
     var a: Binding<Appearance> { $appearance.appearance }
 
     private var glassAvailable: Bool { if #available(macOS 26, *) { true } else { false } }
@@ -191,6 +198,8 @@ private struct AppearancePane: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
+                sliderRow("Density", value: a.density, range: 0.8...1.4, step: 0.05,
+                          suffix: "×", decimals: 2)
                 sliderRow("Corner radius", value: a.cornerRadius, range: 0...16, step: 1, suffix: "px")
                 Toggle("Sidebar on the right", isOn: a.sidebarOnRight)
                 sliderRow("Transparency", value: a.windowOpacity, range: 70...100, step: 1, suffix: "%")
@@ -199,7 +208,7 @@ private struct AppearancePane: View {
             } header: {
                 Text("Layout")
             } footer: {
-                Text("Resize the sidebar by dragging its inner edge. Transparency thins the container fills over the glass; blur is how frosted the glass is.")
+                Text("Density multiplies every gap, pad and control size in Rune at once — the whole interface tightens or opens up together. Resize the sidebar by dragging its inner edge. Transparency thins the container fills over the glass; blur is how frosted the glass is.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
@@ -225,18 +234,11 @@ private struct AppearancePane: View {
                     Text("Centered").tag("center")
                     Text("Right").tag("right")
                 }
-                ForEach(Command.allCases) { command in
-                    Toggle(isOn: toolbarBinding(command)) {
-                        HStack(spacing: 8) {
-                            Image(systemName: command.icon).frame(width: 20).foregroundStyle(.secondary)
-                            Text(command.title)
-                        }
-                    }
-                }
+                Button("Customize Controls…") { dispatch(.editControls) }
             } header: {
                 Text("Toolbar")
             } footer: {
-                Text("Checked commands are placed on one of three shelves: a cluster on either side of the address, or behind the grab tab at the page's bottom right. View → Customize Controls starts wiggle mode, where you drag a button between them (or click it to cycle) — back, forward and reload included. The sidebar toggle keeps its home by the traffic lights. Classic chrome shows everything as one toolbar instead.")
+                Text("Which buttons you have, and where, is decided on the toolbar itself — **View ▸ Customize Controls** starts wiggle mode, where **+** adds a control, the badge removes one, and a drag (or a click) moves it between the two clusters beside the address and the kit behind the grab tab. The sidebar toggle keeps its home by the traffic lights. Classic chrome shows everything as one toolbar instead.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
@@ -270,7 +272,7 @@ private struct AppearancePane: View {
                             { appearance.appearance.appIconName = name }
                         }
                     }
-                    .padding(.vertical, 2)
+                    .padding(.vertical, appearance.space(.hair))
                 }
                 HStack {
                     Text("Light, Dark, or Tinted")
@@ -299,24 +301,14 @@ private struct AppearancePane: View {
         .formStyle(.grouped)
     }
 
-    /// Membership toggle for a command in the toolbar button list — checking
-    /// appends it after the existing buttons, unchecking removes it.
-    private func toolbarBinding(_ command: Command) -> Binding<Bool> {
-        Binding(
-            get: { appearance.appearance.toolbarButtons.contains(command.rawValue) },
-            set: { on in
-                // The store's verbs, so the strip list stays consistent —
-                // unchecking here is the same act as wiggle mode's minus.
-                if on { appearance.move(command.rawValue, to: .corner) }
-                else { appearance.disableControl(command.rawValue) }
-            })
-    }
-
-    private func sliderRow(_ label: String, value: Binding<Double>, range: ClosedRange<Double>, step: Double, suffix: String) -> some View {
+    private func sliderRow(_ label: String, value: Binding<Double>, range: ClosedRange<Double>,
+                           step: Double, suffix: String, decimals: Int = 0) -> some View {
         HStack {
             Text(label)
             Slider(value: value, in: range, step: step).tint(appearance.accent)
-            Text("\(Int(value.wrappedValue)) \(suffix)").monospacedDigit().foregroundStyle(.secondary)
+            Text(decimals == 0 ? "\(Int(value.wrappedValue)) \(suffix)"
+                               : "\(String(format: "%.\(decimals)f", value.wrappedValue))\(suffix)")
+                .monospacedDigit().foregroundStyle(.secondary)
                 .frame(width: 58, alignment: .trailing)
         }
     }
@@ -326,6 +318,7 @@ private struct AppearancePane: View {
 /// has something newer — the release notes and a button out to the download.
 private struct UpdatesPane: View {
     @ObservedObject var updater: Updater
+    @ObservedObject var appearance: AppearanceStore
 
     private var checking: Bool { if case .checking = updater.status { true } else { false } }
 
@@ -337,7 +330,7 @@ private struct UpdatesPane: View {
                 case .idle:
                     EmptyView()
                 case .checking:
-                    HStack(spacing: 8) {
+                    HStack(spacing: appearance.space(.base)) {
                         ProgressView().controlSize(.small)
                         Text("Checking…").foregroundStyle(.secondary)
                     }
@@ -519,6 +512,7 @@ private struct PresetsPane: View {
 // MARK: Browsing (search + data)
 
 private struct BrowsingPane: View {
+    @ObservedObject var appearance: AppearanceStore
     @ObservedObject var settings: SettingsStore
     @ObservedObject var history: HistoryStore
     @ObservedObject var sites: SiteSettings
@@ -657,7 +651,7 @@ private struct BrowsingPane: View {
                     ForEach(DownloadLocation.allCases) { Text($0.label).tag($0) }
                 }
                 LabeledContent("Download folder") {
-                    HStack(spacing: 8) {
+                    HStack(spacing: appearance.space(.base)) {
                         Text(AssetSaver.directory(settings).path
                             .replacingOccurrences(of: NSHomeDirectory(), with: "~"))
                             .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
@@ -775,6 +769,7 @@ private struct BrowsingPane: View {
 
 private struct ShortcutsPane: View {
     @ObservedObject var shortcuts: ShortcutStore
+    @ObservedObject var appearance: AppearanceStore
     var body: some View {
         Form {
             Section {
@@ -783,7 +778,7 @@ private struct ShortcutsPane: View {
                         Image(systemName: command.icon).frame(width: 20).foregroundStyle(.secondary)
                         Text(command.title)
                         Spacer()
-                        KeyRecorderView(current: shortcuts.shortcut(for: command)) {
+                        KeyRecorderView(current: shortcuts.shortcut(for: command), appearance: appearance) {
                             shortcuts.set($0, for: command)
                         }
                     }
@@ -801,11 +796,12 @@ private struct ShortcutsPane: View {
 
 private struct KeyRecorderView: View {
     let current: Shortcut
+    @ObservedObject var appearance: AppearanceStore
     let onRecord: (Shortcut?) -> Void
     @State private var recording = false
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: appearance.space(.snug)) {
             Button { recording.toggle() } label: {
                 Text(recording ? "Press keys…" : current.display).frame(minWidth: 76).monospaced()
             }

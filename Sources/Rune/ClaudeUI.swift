@@ -33,8 +33,8 @@ struct LinkSummaryPopover: View {
     @State private var error: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: appearance.space(.snug)) {
+            HStack(spacing: appearance.space(.snug)) {
                 Image(systemName: "sparkles").font(.system(size: 10)).foregroundStyle(appearance.accent)
                 Text(target.url.host ?? target.url.absoluteString)
                     .font(appearance.type(.label)).lineLimit(1)
@@ -46,7 +46,7 @@ struct LinkSummaryPopover: View {
                 } else if let error {
                     Text(error).font(appearance.type(.label)).foregroundStyle(.secondary)
                 } else {
-                    HStack(spacing: 6) {
+                    HStack(spacing: appearance.space(.snug)) {
                         ProgressView().controlSize(.small).scaleEffect(0.6)
                         Text("Reading…").font(appearance.type(.label)).foregroundStyle(.secondary)
                     }
@@ -93,8 +93,8 @@ struct SelectionActions: View {
     @State private var error: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: appearance.space(.base)) {
+            HStack(spacing: appearance.space(.snug)) {
                 action("Explain", "lightbulb") {
                     await run(system: "Explain the passage plainly, for a smart reader who lacks the background. Be brief.")
                 }
@@ -129,7 +129,7 @@ struct SelectionActions: View {
             Task { await run() }
         } label: {
             Label(title, systemImage: icon).font(appearance.type(.label))
-                .padding(.horizontal, 8).padding(.vertical, 5)
+                .padding(.horizontal, appearance.space(.base)).padding(.vertical, 5)
                 .background(appearance.hover, in: Capsule())
         }
         .buttonStyle(.plain)
@@ -167,7 +167,7 @@ struct AskBar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
+            HStack(spacing: appearance.space(.gap)) {
                 Image(systemName: "sparkles").foregroundStyle(appearance.accent)
                 TextField("Ask about this page…", text: $question)
                     .textFieldStyle(.plain).font(appearance.font(15))
@@ -193,7 +193,7 @@ struct AskBar: View {
         }
         .frame(maxWidth: 620)
         .runeSurface(appearance, .large)
-        .padding(.top, 12)
+        .padding(.top, appearance.space(.roomy))
         .onAppear { focused = true }
         .dismissOnEscape { close() }
     }
